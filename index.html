@@ -1,0 +1,1150 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<title>品質攻防戰</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: factory floor-plan game — header with clock (right), todo column (left, stacks on phone), canvas stage, d-pad. Single industrial "inspection tag" look by design. */
+:root{
+  --floor:#e3e7e2; --ink:#1c2225; --dim:#58636a; --line:#b8c1bf; --panel:#f6f7f3;
+  --steel:#283035; --steel2:#3a444a; --onSteel:#eef2f1; --onSteelDim:#a9b5b8;
+  --hazard:#f0b927; --pass:#1d7a4c; --reject:#c3332c; --teal:#1f5f63; --tag:#f4ecd0;
+  --f-body:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --f-num:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--floor);color:var(--ink);font-family:var(--f-body);-webkit-tap-highlight-color:transparent;overflow:hidden}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible{outline:3px solid var(--hazard);outline-offset:2px}
+.app{height:100%;max-width:1100px;margin:0 auto;display:flex;flex-direction:column}
+.top{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:10px 8px;display:flex;flex-direction:column;gap:8px}
+
+/* HUD */
+.hud{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px}
+.clock{background:var(--steel);color:var(--onSteel);border-radius:8px;padding:7px 11px;display:flex;flex-direction:column;justify-content:center;gap:3px}
+.clock .t{font-family:var(--f-num);font-weight:600;font-size:25px;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.clock small{font-size:11px;color:var(--onSteelDim);white-space:nowrap;font-variant-numeric:tabular-nums}
+.stats{background:var(--steel);color:var(--onSteel);border-radius:8px;padding:8px 11px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 12px;align-content:center;min-width:0}
+.stat{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--onSteelDim);min-width:0;white-space:nowrap}
+.stat b{font-family:var(--f-num);font-weight:600;font-size:18px;line-height:1;color:var(--onSteel);font-variant-numeric:tabular-nums}
+.stat .bar{height:4px;border-radius:2px;background:var(--steel2);overflow:hidden;width:100%}
+.stat .bar i{display:block;height:100%;width:0;background:#5fb58a}
+.stat .bar.risk i{background:#e0645b}
+
+/* current task */
+.taskrow{display:grid;grid-template-columns:minmax(0,1fr) 54px 54px;gap:8px}
+.listbtn.ph .badge{background:var(--hazard);color:var(--ink)}
+.cur{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;align-items:center;text-align:left;background:var(--panel);border:2px solid var(--hazard);border-radius:8px;padding:7px 11px;min-width:0}
+.cur.none{border-style:dashed;border-color:var(--line)}
+.cur.od{border-color:var(--reject)}
+.cur .c-nm{font-weight:700;font-size:15px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.cur .c-dl{font-family:var(--f-num);font-size:12.5px;font-weight:600;color:var(--teal);font-variant-numeric:tabular-nums;white-space:nowrap}
+.cur.od .c-dl{color:var(--reject)}
+.cur .c-nx{grid-column:1/-1;font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.listbtn{position:relative;border:0;border-radius:8px;background:var(--steel);color:var(--onSteel);display:grid;place-items:center}
+.listbtn svg{width:24px;height:24px}
+.badge{position:absolute;top:-6px;right:-6px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--teal);color:#fff;font-family:var(--f-num);font-size:11.5px;font-weight:600;display:grid;place-items:center;box-shadow:0 0 0 2px var(--floor)}
+.badge.od{background:var(--reject)}
+
+/* todo list (in sheet) */
+.counts{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:8px;background:#fff}
+.counts div{display:flex;flex-direction:column;align-items:center;padding:7px 4px;gap:1px}
+.counts div+div{border-left:1px solid var(--line)}
+.counts small{font-size:11.5px;color:var(--dim)}
+.counts strong{font-family:var(--f-num);font-size:18px;font-variant-numeric:tabular-nums}
+.tlist{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden}
+.titem{display:grid;grid-template-columns:4px minmax(0,1fr) auto;gap:2px 10px;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:10px 12px 10px 0;align-items:start}
+.titem:last-child{border-bottom:0}
+.titem .rail{grid-row:1/4;align-self:stretch;background:transparent}
+.titem.sel{background:#fff7da}
+.titem.sel .rail{background:var(--hazard)}
+.titem.od .rail{background:var(--reject)}
+.titem .nm{font-weight:700;font-size:14.5px;line-height:1.35}
+.titem .nx{grid-column:2;font-size:12.5px;color:var(--dim);line-height:1.4}
+.titem .dl{grid-column:2;font-family:var(--f-num);font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums}
+.titem.od .dl{color:var(--reject);font-weight:600}
+.chip{grid-column:3;grid-row:1;font-size:11px;font-weight:700;letter-spacing:.04em;border-radius:3px;padding:2px 6px;white-space:nowrap;border:1px solid currentColor}
+.chip.AVAILABLE{color:var(--dim)} .chip.IN_PROGRESS{color:var(--teal)} .chip.PAUSED{color:#8a6a00} .chip.OVERDUE{color:#fff;background:var(--reject);border-color:var(--reject)} .chip.URGENT{color:var(--ink);background:var(--hazard);border-color:var(--hazard)}
+.titem.urg .rail{background:var(--hazard)}
+.tempty{padding:16px 12px;font-size:13.5px;color:var(--dim);line-height:1.6}
+
+/* stage */
+.stage{position:relative;flex:1;min-height:0;background:var(--steel);overflow:hidden}
+@media (min-width:821px){.stage{margin:0 16px 16px;border-radius:8px}}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.over-top{position:absolute;top:8px;left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;align-items:flex-end;gap:6px;pointer-events:none}
+.toasts{display:flex;flex-direction:column;gap:6px;align-items:flex-end;max-width:min(82%,360px)}
+.toast{background:rgba(40,48,53,.94);color:var(--onSteel);font-size:13px;line-height:1.45;padding:7px 10px;border-radius:6px;border-left:4px solid var(--hazard);box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.toast.bad{border-left-color:var(--reject)}
+.toast.good{border-left-color:#4fbf86}
+.toast.next{border-left-color:#7fc4c8;background:rgba(31,95,99,.96)}
+@media (prefers-reduced-motion:no-preference){.toast{animation:tin .25s ease-out}@keyframes tin{from{transform:translateY(-6px);opacity:0}}}
+.ibar{pointer-events:auto;align-self:stretch;background:rgba(40,48,53,.96);color:var(--onSteel);border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:12px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.ibar .info{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+.ibar .info b{font-size:14px}
+.ibar .info span{font-family:var(--f-num);font-size:12px;color:var(--onSteelDim)}
+.prog{height:8px;border-radius:4px;background:var(--steel2);overflow:hidden}
+.prog i{display:block;height:100%;background:var(--hazard);width:0}
+.btn{border:0;border-radius:6px;padding:9px 14px;font-weight:700;font-size:14px;letter-spacing:.04em}
+.btn.y{background:var(--hazard);color:var(--ink)}
+.btn.d{background:var(--steel);color:var(--onSteel)}
+.btn.g{background:transparent;border:1px solid var(--line);color:var(--ink)}
+.btn.r{background:var(--reject);color:#fff}
+
+/* on-stage controls */
+.keys{position:absolute;left:12px;bottom:12px;font-family:var(--f-num);font-size:11.5px;color:var(--onSteel);background:rgba(40,48,53,.8);padding:5px 9px;border-radius:5px}
+.pad{position:absolute;left:max(12px,env(safe-area-inset-left,0px));bottom:12px;display:none;grid-template-columns:repeat(3,54px);grid-template-rows:repeat(3,54px);gap:2px}
+.pad button{background:rgba(40,48,53,.84);border:1px solid rgba(255,255,255,.14);color:var(--onSteel);border-radius:9px;display:grid;place-items:center;touch-action:none;user-select:none;-webkit-user-select:none}
+.pad button.on{background:var(--teal)}
+.pad svg{width:22px;height:22px}
+.pad .u{grid-column:2;grid-row:1}.pad .l{grid-column:1;grid-row:2}.pad .r{grid-column:3;grid-row:2}.pad .dn{grid-column:2;grid-row:3}
+.act{position:absolute;right:max(14px,env(safe-area-inset-right,0px));bottom:18px;width:88px;height:88px;border-radius:50%;border:0;background:var(--hazard);color:var(--ink);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;box-shadow:0 4px 0 #b8880e,0 8px 18px rgba(0,0,0,.35)}
+.act b{font-size:17px;font-weight:900;letter-spacing:.1em}
+.act small{font-size:11px;font-weight:700;max-width:72px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.act:disabled{background:rgba(58,68,74,.85);color:var(--onSteelDim);box-shadow:0 6px 14px rgba(0,0,0,.3);cursor:default}
+@media (pointer:coarse),(max-width:820px){.pad{display:grid}.keys{display:none}}
+
+/* sheet */
+.veil{position:fixed;inset:0;background:rgba(20,26,29,.45);display:flex;align-items:flex-end;justify-content:center;z-index:20}
+.sheet{width:100%;max-width:580px;max-height:82%;background:var(--panel);border-radius:12px 12px 0 0;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 -10px 30px rgba(0,0,0,.25)}
+@media (min-width:821px){.veil{align-items:center}.sheet{border-radius:12px}}
+.sh-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px max(16px,env(safe-area-inset-right,0px)) 12px max(16px,env(safe-area-inset-left,0px));background:var(--steel);color:var(--onSteel)}
+.sh-h b{font-size:16px;font-weight:900;letter-spacing:.06em}
+.sh-h small{display:block;font-family:var(--f-num);font-size:11px;color:var(--onSteelDim);letter-spacing:.08em;font-weight:500}
+.x{background:none;border:1px solid var(--steel2);color:var(--onSteel);border-radius:6px;padding:5px 10px;font-size:13px}
+.sh-h{flex-shrink:0}
+.sh-b>*{flex-shrink:0}
+.sh-b{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:14px max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px}
+.card{border:1px solid var(--line);border-radius:8px;background:#fff;display:flex;flex-direction:column;overflow:hidden}
+.card-h{padding:10px 12px 8px;display:flex;flex-direction:column;gap:3px}
+.cat{font-family:var(--f-num);font-size:11px;letter-spacing:.12em;color:var(--dim)}
+.card-h b{font-size:15px;line-height:1.4}
+.card-h p{margin:2px 0 0;font-size:13.5px;line-height:1.7;color:#3a4448}
+.card-h .dl{font-family:var(--f-num);font-size:12px;color:var(--dim)}
+.card-h .dl.od{color:var(--reject);font-weight:600}
+.opts{display:flex;flex-direction:column;border-top:1px solid var(--line)}
+.opt{display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;background:none;border:0;padding:11px 12px;font-size:14px;line-height:1.45}
+.opt+.opt{border-top:1px dashed var(--line)}
+.opt:hover{background:#fff7da}
+.opt em{font-style:normal;font-family:var(--f-num);font-size:12px;color:var(--dim);white-space:nowrap;flex:none}
+.empty{margin:0;font-size:14px;line-height:1.7;color:var(--dim)}
+.detail{display:flex;flex-direction:column;gap:10px}
+.detail h3{margin:0;font-size:17px;line-height:1.45;text-wrap:balance}
+.kv{display:grid;grid-template-columns:88px minmax(0,1fr);border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden}
+.kv dt,.kv dd{margin:0;padding:9px 12px;font-size:13.5px;line-height:1.55;border-top:1px solid var(--line)}
+.kv dt:first-of-type,.kv dt:first-of-type+dd{border-top:0}
+.kv dt{color:var(--dim);background:#f0f2ee}
+.kv dd.warn{color:var(--reject);font-weight:700}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row .btn{flex:1;min-width:120px;padding:12px}
+.result{border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:6px;background:#fff;border:2px solid var(--line)}
+.result b{font-size:18px}
+.result.pass{border-color:var(--pass)} .result.pass b{color:var(--pass)}
+.result.fail{border-color:var(--reject)} .result.fail b{color:var(--reject)}
+.result.spc{border-color:#c48a00} .result.spc b{color:#8a6100}
+.result p{margin:0;font-size:13.5px;line-height:1.7}
+.note{font-size:12px;color:var(--dim);line-height:1.6;margin:0}
+
+/* overlays */
+.ov{position:fixed;inset:0;z-index:30;overflow:auto;display:flex;justify-content:center;align-items:flex-start;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:calc(24px + env(safe-area-inset-top,0px)) calc(24px + env(safe-area-inset-bottom,0px));background:rgba(28,34,37,.72)}
+.tagcard{position:relative;width:100%;max-width:520px;background:var(--tag);color:var(--ink);border-radius:10px 10px 10px 10px;box-shadow:0 20px 50px rgba(0,0,0,.4);display:flex;flex-direction:column;overflow:hidden}
+.tagcard .stripe{height:12px;background:repeating-linear-gradient(-45deg,var(--hazard) 0 12px,var(--steel) 12px 24px)}
+.tagcard .hole{position:absolute;top:26px;right:22px;width:22px;height:22px;border-radius:50%;background:rgba(28,34,37,.72);box-shadow:inset 0 0 0 4px #d8cfae}
+.tin{padding:22px 22px 22px;display:flex;flex-direction:column;gap:14px}
+.eyebrow{font-family:var(--f-num);font-size:12px;letter-spacing:.16em;color:var(--dim)}
+.tin h1{margin:0;font-size:clamp(38px,11vw,56px);font-weight:900;line-height:1.05;letter-spacing:.04em;text-wrap:balance}
+.tin h1 small{display:block;font-size:.38em;font-weight:700;letter-spacing:.12em;color:var(--teal);margin-bottom:8px}
+.tin p{margin:0;font-size:14.5px;line-height:1.8}
+.form{display:grid;grid-template-columns:auto minmax(0,1fr);border-top:1.5px solid var(--ink);border-bottom:1.5px solid var(--ink)}
+.form span{font-size:12.5px;padding:7px 10px 7px 0;border-bottom:1px dashed #b9ad87;color:var(--dim);white-space:nowrap}
+.form strong{font-size:13.5px;padding:7px 0;border-bottom:1px dashed #b9ad87;font-weight:500;line-height:1.5}
+.form span:nth-last-child(2),.form strong:last-child{border-bottom:0}
+.stamp{align-self:flex-start;border:3px solid var(--reject);color:var(--reject);font-weight:900;letter-spacing:.2em;padding:6px 14px;border-radius:6px;transform:rotate(-4deg);font-size:15px}
+.big{width:100%;padding:15px;font-size:18px;letter-spacing:.2em;font-weight:900;border-radius:8px;background:var(--steel);color:var(--onSteel);border:0}
+.big:hover{background:var(--teal)}
+.sendbtn{display:block;text-align:center;text-decoration:none;background:var(--hazard);color:var(--ink)}
+.sendbtn:hover{background:#ffcd4a}
+.lunch{position:fixed;inset:0;z-index:40;background:#000;color:#fff;display:grid;place-items:center;font-size:34px;font-weight:900;letter-spacing:.3em}
+.lunch span{display:block;text-align:center;font-family:var(--f-num);font-size:14px;letter-spacing:.2em;color:#9aa;margin-top:10px;font-weight:500}
+
+/* name + admin */
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:13px;font-weight:700;letter-spacing:.06em}
+.field input{font:inherit;font-size:17px;padding:11px 12px;border:1.5px solid var(--ink);border-radius:8px;background:#fffdf3;color:var(--ink);width:100%}
+.field input:focus{outline:3px solid var(--hazard);outline-offset:1px}
+.big:disabled{background:#b9b3a0;color:#efeadb;cursor:default}
+.linkbtn{background:none;border:0;padding:4px 0;color:var(--teal);font-weight:700;font-size:14px;text-decoration:underline;text-underline-offset:3px;align-self:flex-start}
+.upl{font-size:13px;line-height:1.6;padding:9px 12px;border-radius:8px;background:#fffdf3;border:1px dashed #b9ad87}
+.upl.ok{border-style:solid;border-color:var(--pass);color:var(--pass)}
+.upl.no{border-color:var(--reject)}
+.admin-wrap{width:100%;max-width:980px;background:var(--panel);border-radius:10px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.4);display:flex;flex-direction:column}
+.admin-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;background:var(--steel);color:var(--onSteel)}
+.admin-h b{font-size:17px;letter-spacing:.06em}
+.admin-b{padding:14px 16px 18px;display:flex;flex-direction:column;gap:12px}
+.sum{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.sum div{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+.sum small{font-size:12px;color:var(--dim)} .sum strong{font-family:var(--f-num);font-size:20px;font-variant-numeric:tabular-nums}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
+.tbl table{border-collapse:collapse;width:100%;min-width:720px;font-size:13px}
+.tbl th,.tbl td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+.tbl th{background:#f0f2ee;color:var(--dim);font-weight:700;font-size:12px}
+.tbl td.n{font-family:var(--f-num);font-variant-numeric:tabular-nums;text-align:right}
+.tbl td.red{color:var(--reject);font-weight:700}
+
+/* ending */
+.end-stamp{align-self:flex-start;font-size:clamp(28px,8vw,40px);font-weight:900;letter-spacing:.12em;border:4px solid currentColor;border-radius:8px;padding:6px 16px;transform:rotate(-3deg)}
+.end-stamp.red{color:var(--reject)} .end-stamp.green{color:var(--pass)} .end-stamp.teal{color:var(--teal)} .end-stamp.amber{color:#9a6a00}
+.metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.metric{background:#fffdf3;border:1px solid #d8cfae;border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+.metric small{font-size:12px;color:var(--dim)}
+.metric strong{font-family:var(--f-num);font-size:22px;font-variant-numeric:tabular-nums}
+.metric .m-bar{height:5px;background:#e4dcc0;border-radius:3px;overflow:hidden}
+.metric .m-bar i{display:block;height:100%;background:var(--teal)}
+.metric.risk .m-bar i{background:var(--reject)}
+.score-line{display:flex;justify-content:space-between;gap:8px;font-family:var(--f-num);font-size:13px;font-variant-numeric:tabular-nums;border-top:1.5px solid var(--ink);border-bottom:1.5px solid var(--ink);padding:8px 0}
+.score-line b{font-size:16px}
+.sect{display:flex;flex-direction:column;gap:6px}
+.sect h4{margin:0;font-size:13px;letter-spacing:.12em;color:var(--dim);font-weight:700}
+.sect ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px;line-height:1.65}
+.adv li b{display:block}
+.adv li span{color:#3a4448}
+.foot-note{font-size:12px;color:var(--dim);line-height:1.6}
+</style>
+
+<div class="app" id="app">
+  <div class="top">
+    <div class="hud">
+      <div class="clock"><div class="t" id="clock">08:00</div><small id="where">品質辦公室・剩 9:00</small></div>
+      <div class="stats">
+        <div class="stat num"><span>事件分數</span><b id="sEv">0</b></div>
+        <div class="stat"><span>品質風險</span><b id="sRisk">0</b><span class="bar risk"><i id="bRisk"></i></span></div>
+        <div class="stat num"><span>超時扣分</span><b id="sPen">0</b></div>
+      </div>
+    </div>
+    <div class="taskrow">
+      <button class="cur none" id="cur"><span class="c-nm" id="cNm">點這裡選擇任務</span><span class="c-dl" id="cDl"></span><span class="c-nx" id="cNx">選一項任務，地上會出現引導線</span></button>
+      <button class="listbtn" id="listBtn" aria-label="今日待辦清單"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM8.5 11h7M8.5 14.5h7M8.5 18h4"/></svg><span class="badge" id="badge">0</span></button>
+      <button class="listbtn ph" id="phoneBtn" aria-label="手機"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg><span class="badge" id="phBadge" hidden>0</span></button>
+    </div>
+  </div>
+
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div class="over-top">
+      <div class="ibar" id="ibar" hidden>
+        <div class="info"><b id="iName">檢驗中</b><span id="iLeft">剩 15 分</span><div class="prog"><i id="iProg"></i></div></div>
+        <button class="btn y" id="iPause">暫停檢驗</button>
+      </div>
+      <div class="toasts" id="toasts"></div>
+    </div>
+    <div class="keys">方向鍵 / WASD 移動・E 互動</div>
+    <div class="pad" id="pad" aria-label="方向鍵">
+      <button class="u" data-k="up" aria-label="上"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg></button>
+      <button class="l" data-k="left" aria-label="左"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
+      <button class="r" data-k="right" aria-label="右"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
+      <button class="dn" data-k="down" aria-label="下"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+    </div>
+    <button class="act" id="act" disabled><b>互動</b><small id="actTag">靠近工作站</small></button>
+  </div>
+</div>
+
+<div class="veil" id="veil" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="shTitle">
+    <div class="sh-h"><div><small id="shSub">LOCATION</small><b id="shTitle">位置</b></div><button class="x" id="shClose">關閉</button></div>
+    <div class="sh-b" id="shBody"></div>
+  </div>
+</div>
+
+<div class="lunch" id="lunch" hidden><div>午休時間<span>12:00 → 13:00</span></div></div>
+
+<div class="ov" id="intro">
+  <div class="tagcard">
+    <div class="stripe"></div><div class="hole" aria-hidden="true"></div>
+    <div class="tin">
+      <div class="eyebrow">品質部門 · 檢驗標籤 No. 2610-001</div>
+      <h1><small>品質部門的一天</small>品質攻防戰</h1>
+      <p>你是品質部門的檢驗人員。從 08:00 到 17:00，要在 IQC、FQC、巡檢、客訴和文件之間排出優先順序。走動時現實 2 秒＝遊戲 1 分鐘，檢驗時 1 秒＝1 分鐘，閱讀文字時暫停。通知產線、採購、生管要用右上角的手機。</p>
+      <div class="form">
+        <span>工作時間</span><strong>08:00 – 17:00（午休直接跳過）</strong>
+        <span>遊玩時間</span><strong>約 10–15 分鐘</strong>
+        <span>評分</span><strong>事件分數 − 品質風險 − 超時扣分（每個步驟超過期限，每 15 分鐘扣 5 分）</strong>
+        <span>操作</span><strong>方向鍵 / WASD 或畫面方向鍵移動，E 或「互動」執行</strong>
+        <span>成績</span><strong>完成一天後，名字和成績會自動傳給主辦人</strong>
+      </div>
+      <div class="field"><label for="pname">你的名字</label><input id="pname" maxlength="20" autocomplete="name" placeholder="例如：王小明"></div>
+      <button class="big" id="startBtn" disabled>開始上班</button>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="ending" hidden>
+  <div class="tagcard">
+    <div class="stripe"></div><div class="hole" aria-hidden="true"></div>
+    <div class="tin" id="endBody"></div>
+  </div>
+</div>
+
+<script>
+/* ===================== 可調整參數 ===================== */
+const CONFIG={
+  realSecPerGameMin:2,     // 走動：現實 2 秒 = 遊戲 1 分鐘；閱讀文字時暫停
+  inspectSecPerGameMin:1,  // 檢驗：現實 1 秒 = 遊戲 1 分鐘
+  moveSpeed:4.2,           // 每秒移動格數
+  lunchMs:1800,
+  iqcInspect:15, fqcInspect:15, cpInspect:20, urgInspect:15,
+  sampleRM:5, holdLabel:3, passLabel:3, phone:2, supervisor:5, formalMail:8,
+  spcDiscuss:10, patrol:30, patrolReport:3,
+  cpRead:5, cpDiscuss1:10, cp5M1E:20, cpDiscuss2:20, cp8D:15, cpReview:5, cpSend:2,
+  coa:10, filing:5, briefing:10,
+  overtimeEvery:15, overtimePoints:5,  // 每個步驟超過期限後，每 15 分鐘扣 5 分（不足 15 分鐘也算一次）
+  filingAt:870,            // 製單歸檔：14:30 後且成品檢驗完成
+  patrolAt:600,            // 巡檢：10:00 後才能執行
+  tempComplaints:5,        // 每天臨時客訴數（含兩件固定）
+  emergencies:3,           // 每天隨機緊急狀況數
+  urgentTrueRate:.7,       // 緊急檢驗確認後真的很急的機率
+  guardianRiskMax:10, guardianCompletionMin:0.8,
+  patrolMajor:{fqc:false,feed:true,unqual:true},
+  trustStart:60, trustOverdue:0
+};
+
+/* ===================== 地圖 ===================== */
+const GRID=[
+"########################",
+"#OOOOOOOO#MMMMMM#LLLLLL#",
+"#OOOOOOOO#MMMMMM#LLLLLL#",
+"#OOOOOOOO#MMMMMM#LLLLLL#",
+"#OOOOOOOO#MMMMMM#LLLLLL#",
+"####..######..#####..###",
+"#CCCCCCCCCCCCCCCCCCCCCC#",
+"#CCCCCCCCCCCCCCCCCCCCCC#",
+"#####..############..###",
+"#PPPPPPPPPPPPPP#SSSSSSS#",
+"#PPPPPPPPPPPPPP#SSSSSSS#",
+"#PBBBBBBBBBBBPP#SSSSSSS#",
+"#PPPPPPPPPPPPPP#SSSSSSS#",
+"########################"];
+const GW=24,GH=14,TS=32;
+const LOCS={
+  O:{x:3,y:2,name:'品質辦公室・電腦',short:'辦公室電腦',tag:'電腦'},
+  M:{x:13,y:2,name:'主管辦公室',short:'主管辦公室',tag:'主管'},
+  L:{x:20,y:2,name:'實驗室・檢驗台',short:'實驗室',tag:'檢驗台'},
+  S:{x:19,y:10,name:'送樣區',short:'送樣區',tag:'送樣架'},
+  P:{x:7,y:10,name:'產線・巡檢站',short:'產線',tag:'巡檢站'},
+  T:{phone:true,name:'手機',short:'手機',tag:'手機'}
+};
+const ROOMLBL=[['品質辦公室',1,1],['主管辦公室',10,1],['實驗室',17,1],['走廊',1,6],['產線',1,9],['送樣區',16,9]];
+const FLOOR={O:'#dce5e4',M:'#e6dfd2',L:'#eef2f3',C:'#c6cdcb',S:'#e6dfc2',P:'#cbd2d0','.':'#c6cdcb',B:'#3a444a'};
+const walk=(x,y)=>x>=0&&y>=0&&x<GW&&y<GH&&GRID[y][x]!=='#'&&GRID[y][x]!=='B';
+
+/* ===================== 工具 ===================== */
+const $=s=>document.querySelector(s);
+const fmt=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+const fdur=m=>m>=60?`${Math.floor(m/60)} 小時 ${m%60?m%60+' 分':''}`.trim():`${m} 分鐘`;
+const clamp=(v,a=0,b=100)=>Math.max(a,Math.min(b,v));
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let S;
+const byId=id=>S.tasks.find(t=>t.id===id);
+const stepByKey=(t,k)=>t&&t.steps.find(s=>s.key===k);
+const stepDone=(t,k)=>{const s=stepByKey(t,k);return !!(s&&s.done)};
+
+function T(o){return Object.assign({unlocked:false,step:0,done:false,ts:{},deadlines:[],mandatory:true,cat:'',notice:null},o)}
+
+/* ===================== 任務資料 ===================== */
+const W=loc=>LOCS[loc].short;
+const phoneStep=(key,who,extra={})=>Object.assign({key,loc:'T',title:`用手機通知${who}`,choices:[
+  {label:`打電話通知${who}，說明批號與判定`,dur:CONFIG.phone,score:20},
+  {label:`先不通知${who}，晚點再說`,dur:0,score:0,risk:10,flag:'skipNotify',riskText:`${who}不知道狀況，可能繼續使用或出貨`}]},extra);
+const supStep=(key,title,okLabel,okOut,extra={})=>Object.assign({key,loc:'M',title,choices:[
+  {label:okLabel,dur:CONFIG.supervisor,score:20,trust:3,outcome:okOut,fx:t=>t.ts.sup=S.now},
+  {label:'主管在忙，先不報告',dur:0,score:0,risk:5,flag:'skipSupervisor',fx:t=>t.ts.sup=S.now,riskText:'主管不知道這個異常'}]},extra);
+const holdStep=()=>({key:'hold',loc:'P',title:'張貼 Hold 標籤',choices:[
+  {label:'親自張貼 Hold 標籤並確認批號',dur:CONFIG.holdLabel,score:20,fx:t=>{t.ts.hold=S.now;if(!t.deadlines.find(d=>d.until==='hold').missed)S.flags.holdOnTime=true}},
+  {label:'請產線人員代貼，自己不去確認',dur:0,score:10,risk:10,flag:'delegateLabel',fx:t=>t.ts.hold=S.now,riskText:'標籤可能沒貼或貼錯批'}]});
+const mailStep=(what,extra)=>({key:'mail',loc:'O',title:'發出正式信件',desc:`內容要包含：${what}。`,choices:[
+  {label:`寫完整信件（${what}）`,dur:CONFIG.formalMail,score:20},
+  {label:'只寫「不合格，請處理」就寄出',dur:2,score:10,risk:10,flag:'briefMail',riskText:'資訊不足，收件人無法判斷影響範圍'}],...extra});
+function sampleTask({id,kind,name,mat,batch,result,appear}){
+  const RM=kind==='IQC';
+  const t=T({id,cat:RM?'IQC':'FQC',name,appear,sample:{mat,batch,result,kind},
+    notice:RM?`${name}：原料到廠，請到產線取樣（1 小時內）`:`${name}：樣品已送到送樣區（1 小時內領取）`});
+  const collect=RM
+    ?{key:'collect',loc:'P',title:'到產線取樣',desc:`${mat}｜批號 ${batch}`,choices:[
+      {label:'依抽樣計畫取樣',dur:CONFIG.sampleRM,score:20,fx:t=>t.ts.collected=S.now},
+      {label:'只從最上面一箱取樣，比較快',dur:1,score:10,risk:10,flag:'badSampling',fx:t=>t.ts.collected=S.now,riskText:'樣品沒有代表性'}]}
+    :{key:'collect',loc:'S',title:'到送樣區領取樣品',desc:`${mat}｜批號 ${batch}`,choices:[
+      {label:'領取樣品',dur:1,score:20,fx:t=>t.ts.collected=S.now},
+      {label:'產線在催，先不檢驗直接放行',dur:1,score:0,risk:50,major:`${name}：未完成檢驗即放行`,flag:'skipInspect',end:true,riskText:'構成重大品質失誤：沒有檢驗紀錄就放行'}]};
+  t.steps=[collect,{key:'inspect',loc:'L',title:'執行檢驗',desc:`${mat}｜批號 ${batch}`,inspect:RM?CONFIG.iqcInspect:CONFIG.fqcInspect,remaining:RM?CONFIG.iqcInspect:CONFIG.fqcInspect}];
+  if(RM) t.steps.push({key:'return',loc:'S',title:'放置樣品',choices:[{label:'把樣品與檢驗結果放回送樣區',dur:1,score:20},
+    {label:'樣品先留在實驗室，晚點再拿',dur:0,score:10,flag:'sloppySample',riskText:'樣品沒有歸位，可能被誤用'}]});
+  t.onInspected=t=>{t.ts.result=S.now;
+    const add=a=>t.steps.push(...a);
+    if(RM&&result==='pass') add([{key:'label',loc:'P',title:'張貼合格標籤',choices:[
+      {label:'親自張貼合格標籤',dur:CONFIG.passLabel,score:20,fx:t=>t.released=true},
+      {label:'請產線人員代貼',dur:0,score:10,risk:5,flag:'delegateLabel',fx:t=>t.released=true}]}]);
+    if(RM&&result==='fail') add([phoneStep('callLine','產線'),supStep('sup','向主管報告 IQC 不合格','向主管報告不合格情況','主管：通知採購，貼 Hold 標籤，再發正式信件。'),
+      phoneStep('callBuy','採購'),holdStep(),mailStep('原料資訊、檢驗結果、判定')]);
+    if(!RM&&result==='pass') add([phoneStep('callLine','產線'),{key:'place',loc:'S',title:'放置樣品與製單',choices:[
+      {label:'把樣品與製單放回送樣區',dur:2,score:20,fx:t=>t.released=true},
+      {label:'製單先夾在自己桌上',dur:0,score:10,flag:'sloppySample',fx:t=>t.released=true,riskText:'製單沒有歸位，後續歸檔會缺件'}]}]);
+    if(!RM&&result==='fail') add([phoneStep('callLine','產線'),supStep('sup','向主管報告 FQC 不合格','向主管報告不合格情況','主管：通知生管，貼 Hold 標籤，再發正式信件。'),
+      phoneStep('callPC','生管'),holdStep(),mailStep('產品資訊、檢驗結果、判定')]);
+    if(!RM&&result==='spc') add([phoneStep('callLine','產線'),
+      {key:'sup',loc:'M',title:'向主管報告 SPC 異常',choices:[
+        {label:'報告 SPC 異常並討論',dur:CONFIG.spcDiscuss,score:20,trust:5,fx:t=>{t.ts.sup=S.now;t.released=true},outcome:'主管同意放行，但正式信件要寫清楚風險。'},
+        {label:'數值都在規格內，自己判定放行',dur:0,score:0,risk:15,flag:'ignoreSPC',fx:t=>{t.ts.sup=S.now;t.released=true},riskText:'製程異常訊號沒有經過主管判斷'}]},
+      Object.assign(mailStep('原料資訊、檢驗結果、判定、風險說明'),{choices:[
+        {label:'寫完整信件，含風險說明',dur:CONFIG.formalMail,score:20,fx:()=>S.flags.spcHandled=true},
+        {label:'不寫風險說明，免得業務緊張',dur:4,score:0,risk:15,flag:'ignoreSPC',riskText:'收件人不知道潛在風險'}]})]);
+  };
+  t.deadlines=[
+    {label:RM?'到產線取樣':'領取樣品',at:t=>t.ts.appear+60,until:'collect',flag:'latePickup'},
+    {label:'取樣後 1 小時內完成檢驗',at:t=>t.ts.collected!=null?t.ts.collected+60:null,until:'inspect',flag:'lateResult'},
+    {label:'張貼 Hold 標籤（判定後 1 小時內）',at:t=>result==='fail'&&t.ts.result!=null?t.ts.result+60:null,until:'hold',flag:'lateHold',risk:10},
+    {label:'發出正式信件（1 小時內）',at:t=>{const b=result==='fail'?t.ts.hold:result==='spc'?t.ts.sup:null;return b!=null?b+60:null},until:'mail',flag:'lateMail'}];
+  if(RM) t.deadlines.push({label:'IQC 完成（10:00 前）',at:()=>600,until:'return',flag:'iqcLate'});
+  t.resultText={
+    pass:['pass','判定：合格',`${mat}（批號 ${batch}）各檢驗項目均符合規格。`],
+    fail:['fail','判定：不合格',`${mat}（批號 ${batch}）有檢驗項目超出規格，要走不合格流程。`],
+    spc:['spc','判定：規格內，SPC 異常',`${mat}（批號 ${batch}）數值在規格內，但管制圖出現異常趨勢，要通知產線並報告主管。`]
+  }[result];
+  t.onDone=t=>{ if(t.released&&!RM) addCOA(t); };
+  return t;
+}
+function addCOA(st){
+  const id='COA_'+st.id; if(byId(id)) return;
+  S.tasks.push(T({id,cat:'文件',name:`COA｜${st.sample.mat}`,appear:S.now,notice:`可以開立 COA：${st.sample.mat}`,
+    steps:[{key:'coa',loc:'O',title:'開立 COA',desc:`批號 ${st.sample.batch}`,choices:[{label:'開立並上傳 COA',dur:CONFIG.coa,score:20},
+      {label:'沿用上一批的數據開立，比較快',dur:3,score:0,risk:40,flag:'fakeCOA',major:`COA｜${st.sample.mat}：沿用舊批數據`,riskText:'構成重大品質失誤：COA 數據與實際檢驗不符'}]}]}));
+}
+function patrolTask(){
+  const F=[
+    {k:'fqc',title:'發現：FQC 結果尚未回報，產線已開始包裝',desc:'包裝線上的成品還沒有 FQC 判定紀錄，作業員說「先包起來比較快」。'},
+    {k:'feed',title:'發現：投料錯誤',desc:'投料紀錄上的原料批號，和現場桶上的標示不一致，攪拌已經開始。'},
+    {k:'unqual',title:'發現：未符合資格的人員自行操作',desc:'一位尚未完成上崗訓練的新人，正在沒有人陪同的情況下操作設備。'}];
+  const t=T({id:'PATROL',cat:'巡檢',name:'每日巡檢',appear:CONFIG.patrolAt,notice:'10:00 了，可以開始每日巡檢（15:00 前完成）'});
+  t.steps=[{key:'walk',loc:'P',title:'執行每日巡檢',desc:'沿產線檢查作業與紀錄。',choices:[{label:'開始巡檢',dur:CONFIG.patrol,score:20,outcome:'巡檢途中有三項發現，請逐一判斷。'},
+    {label:'趕時間，只巡一半',dur:15,score:10,risk:15,flag:'halfPatrol',fx:t=>t.steps.pop(),riskText:'有一區沒巡到，問題可能沒被發現',outcome:'你只巡了一半，有一區沒看到。'}]}];
+  F.forEach((f,i)=>{
+    const major=CONFIG.patrolMajor[f.k];
+    t.steps.push({key:'f'+i,loc:'P',chain:true,title:f.title,desc:f.desc,choices:[
+      {label:'回報並要求現場處理',dur:CONFIG.patrolReport,score:20,trust:3,fx:()=>S.patrolReported=(S.patrolReported||0)+1},
+      {label:'口頭提醒現場，不留紀錄',dur:1,score:10,risk:major?15:5,flag:'verbalOnly',riskText:'沒有紀錄，問題可能再發生'},
+      {label:'不回報，繼續巡檢',dur:0,score:0,risk:major?40:20,flag:'patrolIgnore',
+        major:major?`巡檢：${f.title.replace('發現：','')}未回報`:null,
+        riskText:major?'構成重大品質失誤：重大且即時的現場風險未處理':'品質風險上升'}]});
+  });
+  t.deadlines=[{label:'完成巡檢（15:00 前）',at:()=>900,until:'walk'}];
+  return t;
+}
+function reviewFx(t){
+  if(t.template&&!t.reworked){t.reworked=true;notify('主管退回 8D：要附上檢驗與 5M1E 調查結果。','bad');
+    t.steps.splice(t.step+1,0,
+      {key:'rework',loc:'O',title:'依主管意見修改 8D',choices:[{label:'補上調查結果並修改',dur:10,score:10}]},
+      {key:'review2',loc:'M',title:'再次提交主管審查',choices:[{label:'再次提交審查',dur:CONFIG.cpReview,score:10}]});}
+}
+function complaintFlow(c,main){
+  return [
+    {key:'disc1',loc:'M',title:'與主管初步討論',choices:[{label:'報告客訴內容並討論調查方向',dur:CONFIG.cpDiscuss1,score:20,trust:5,outcome:'主管：先做留樣檢驗，再到現場查 5M1E。'},
+      {label:'不找主管，自己決定調查方式',dur:0,score:0,risk:5,flag:'skipSupervisor',riskText:'主管不知道有這件客訴'}]},
+    {key:'lab',loc:'L',title:'留樣檢驗',desc:'檢驗方法待品質部門確認，原型以佔位流程呈現。',inspect:CONFIG.cpInspect,remaining:CONFIG.cpInspect},
+    {key:'5m1e',loc:'P',title:'調查 5M1E',desc:'到產線確認人、機、料、法、環、測六個面向，找出可能原因。',choices:[
+      {label:'逐項調查人、機、料、法、環、測',dur:CONFIG.cp5M1E,score:20},
+      {label:'只查原料批號，其他略過',dur:5,score:10,risk:10,flag:'partial5M1E',riskText:'可能漏掉真正的原因'},
+      {label:'跳過調查，直接寫報告',dur:0,score:0,risk:15,flag:'skip5M1E',fx:t=>t.template=true,riskText:'沒有調查依據，8D 可能被退回'}]},
+    {key:'disc2',loc:'M',title:'向主管報告調查結果',choices:[{label:'報告檢驗與 5M1E 調查結果',dur:CONFIG.cpDiscuss2,score:20,trust:3},
+      {label:'跳過報告，直接寫 8D',dur:0,score:0,risk:5,flag:'skipSupervisor'}]},
+    {key:'8d',loc:'O',title:'撰寫 8D 報告',choices:[
+      {label:'依調查結果完整撰寫 8D',dur:CONFIG.cp8D,score:20},
+      {label:'套用範本，數據之後再補',dur:8,score:10,flag:'templateReport',fx:t=>t.template=true,riskText:'審查時可能被退回重工'},
+      {label:'寫成客戶保存方式不當',dur:8,score:0,risk:10,flag:'blameCustomer',fx:t=>t.template=true,riskText:'沒有證據就歸咎客戶，可能被退回'}]},
+    {key:'review',loc:'M',title:'提交 8D 給主管審查',choices:[{label:'提交主管審查',dur:CONFIG.cpReview,score:20,fx:reviewFx},
+      {label:'時間不夠，不送審',dur:0,score:0,risk:10,flag:'skipReview',riskText:'未經內部審查就對外回覆'}]},
+    {key:'send',loc:'O',title:'寄出初步回覆',choices:[{label:'寄出初步回覆給客戶',dur:CONFIG.cpSend,score:20}]}];
+}
+function mainComplaint(){
+  const t=T({id:'CP',cat:'客訴',name:'客訴：錫膏發乾',appear:630,notice:'電腦收到新客訴：錫膏發乾（12:00 前要和主管初步討論）'});
+  t.steps=[{key:'read',loc:'O',title:'查看客訴信件',desc:'客戶來信：最近收到的錫膏開罐後偏乾，印刷時下錫不順。（情境資料，正式內容待品質部門提供）',choices:[
+      {label:'詳細閱讀客訴資訊並建立案件',dur:CONFIG.cpRead,score:20},
+      {label:'直接轉給業務處理，不建立案件',dur:0,score:0,risk:10,flag:'dumpComplaint',end:true,riskText:'固定客訴沒有人調查'}]},
+    ...complaintFlow({},true)];
+  t.deadlines=[
+    {label:'與主管初步討論（12:00 前）',at:()=>720,until:'disc1',flag:'cpLate'},
+    {label:'寄出初步回覆（16:30 前）',at:()=>990,until:'send',flag:'cpLate'}];
+  t.resultText=['spc','留樣檢驗完成','留樣檢驗流程已完成。正式檢驗方法與結果待品質部門提供。'];
+  return t;
+}
+const CP_POOL=[
+  {name:'化學品桶底沉澱',say:'化學品桶開封後，桶底有沉澱物。',known:'同批號仍有庫存，是否影響使用尚未確認。',risky:false,fixed:true},
+  {name:'錫絲混料',say:'同一捲錫絲內混有不同線徑。',known:'同批號庫存仍在出貨。',risky:true,fixed:true},
+  {name:'助焊劑殘留過多',say:'回焊後板面殘留明顯，清洗後仍有白霧。',known:'客戶近期調整過回焊爐溫。',risky:false},
+  {name:'包裝標籤批號錯誤',say:'外箱標籤批號和內容物批號不一致。',known:'同一天包裝的另外兩箱已經出貨給其他客戶。',risky:true},
+  {name:'錫膏黏度偏高',say:'新到的錫膏印刷時拉尖、脫模不良。',known:'這批的冷藏運送紀錄還沒拿到。',risky:false},
+  {name:'錫條表面氧化',say:'錫條表面發黑，熔錫時浮渣變多。',known:'這批錫條在倉庫放置較久。',risky:false}];
+function tempComplaint(id,c,appear){
+  const risky=c.risky, lim=risky?30:60;
+  const desc=`客戶反映：${c.say}\n已知資訊：${c.known}\n接案耗時：約 1.5 小時（主管討論、留樣檢驗、5M1E、8D、審查）。\n需立即管控的重大風險：${risky?'是，必須通報並隔離同批庫存':'目前未知'}。\n要在 ${lim} 分鐘內決定處理方式。（情境資料，正式內容待品質部門提供）`;
+  const t=T({id,cat:'臨時客訴',name:'臨時客訴：'+c.name,appear,mandatory:false,risky,notice:`電腦收到臨時客訴：${c.name}（${lim} 分鐘內決定處理方式）`});
+  const ch=[{label:'接案，走完整客訴流程',dur:CONFIG.cpRead,score:20,fx:t=>{S.flags.tookTemp=true;t.controlled=true;t.steps.push(...complaintFlow(c,false))}}];
+  if(risky){
+    ch.push({label:'先通報主管隔離庫存，交由同事接手',dur:0,score:20,fx:t=>t.steps.push({key:'h',loc:'M',title:'通報主管、隔離庫存並交接',choices:[{label:'通報、管控並交接',dur:5,score:20,trust:3,fx:t=>t.controlled=true}]})});
+    ch.push({label:'寄信叫業務自己去處理',dur:3,score:0,risk:25,flag:'riskyCpIgnore',end:true,riskText:'沒有實際隔離庫存，風險仍在'});
+    ch.push({label:'先不處理',dur:0,score:0,risk:40,flag:'riskyCpIgnore',end:true,major:`${c.name}：已知即時風險未通報管控`,riskText:'構成重大品質失誤：已知重大且即時的風險未通報'});
+  }else{
+    ch.push({label:'登記追蹤，延到明天處理',dur:1,score:10,end:true});
+    ch.push({label:'回覆客戶是使用方式不當',dur:5,score:0,risk:10,flag:'blameCustomer',end:true,riskText:'沒有調查就回覆，客戶可能升級客訴'});
+    ch.push({label:'先不理會',dur:0,score:0,risk:10,flag:'tempNoReply',end:true,riskText:'品質風險略升'});
+  }
+  t.steps=[{key:'eval',loc:'O',title:'查看客訴信件，決定是否接案',desc,choices:ch}];
+  t.deadlines=[{label:`決定處理方式（${lim} 分鐘內）`,at:t=>t.ts.appear+lim,until:'eval',flag:risky?'riskyCpLate':'tempNoReply',risk:risky?20:0}];
+  t.resultText=['spc','留樣檢驗完成','流程已完成。正式檢驗方法待品質部門提供。'];
+  return t;
+}
+function urgentInspect(kind,at){
+  const RM=kind==='RM', mat=RM?'錫粉（急用原料）':'錫膏成品（急件）', batch=RM?'RM-2610-090':'FG-2610-130';
+  const t=T({id:'URG_'+kind,cat:'緊急',name:RM?'緊急檢驗需求：原料':'緊急檢驗需求：成品',urgent:true,mandatory:false,appear:at,
+    sample:{mat,batch,result:'pass',kind:RM?'IQC':'GEN',urgent:true},
+    notice:`緊急檢驗需求：${RM?'產線':'業務'}來電要求插單（20 分鐘內確認緊急程度）`});
+  const tail=()=>RM
+    ?[{key:'collect',loc:'P',title:'到產線取樣',desc:`${mat}｜批號 ${batch}`,choices:[{label:'依抽樣計畫取樣',dur:CONFIG.sampleRM,score:20,fx:t=>t.ts.collected=S.now}]},
+      {key:'inspect',loc:'L',title:'執行檢驗',inspect:CONFIG.urgInspect,remaining:CONFIG.urgInspect},
+      {key:'return',loc:'S',title:'放置樣品',choices:[{label:'把樣品與檢驗結果放回送樣區',dur:1,score:20}]},
+      {key:'label',loc:'P',title:'張貼合格標籤',choices:[{label:'親自張貼合格標籤',dur:CONFIG.passLabel,score:20}]}]
+    :[{key:'collect',loc:'S',title:'到送樣區領取樣品',desc:`${mat}｜批號 ${batch}`,choices:[{label:'領取樣品',dur:1,score:20,fx:t=>t.ts.collected=S.now}]},
+      {key:'inspect',loc:'L',title:'執行檢驗',inspect:CONFIG.urgInspect,remaining:CONFIG.urgInspect},
+      phoneStep('callLine','產線'),
+      {key:'place',loc:'S',title:'放置樣品與製單',choices:[{label:'把樣品與製單放回送樣區',dur:2,score:20,fx:t=>t.released=true}]}];
+  t.steps=[{key:'confirm',loc:'T',title:'確認緊急程度',desc:`${RM?'產線組長':'業務'}：「${RM?'這批原料下午就要投料':'客戶在等貨'}，可以馬上檢驗嗎？」`,choices:[
+    {label:'打電話確認需求時間與數量',dur:3,score:20,fx:t=>{t.ts.confirmed=S.now;t.isUrgent=Math.random()<CONFIG.urgentTrueRate;
+      if(!t.isUrgent){t.urgent=false;t.name+='（可排程）'}t.steps.push(...tail())},
+      outcome:'確認完成。'},
+    {label:'不確認，直接當急件插隊',dur:0,score:10,flag:'noConfirm',fx:t=>{t.ts.confirmed=S.now;t.isUrgent=true;t.steps.push(...tail())}},
+    {label:'不確認，排到明天再說',dur:0,score:0,risk:20,flag:'emIgnore',end:true,riskText:'如果真的很急，產線或客戶會被延誤'}]}];
+  t.after=t=>notify(t.isUrgent?'確認是急件：1 小時內要完成檢驗。':'確認不急：16:30 前完成即可。',t.isUrgent?'bad':'good');
+  t.onInspected=t=>{t.ts.result=S.now};
+  t.deadlines=[
+    {label:'確認緊急程度（20 分鐘內）',at:t=>t.ts.appear+20,until:'confirm',flag:'emergencyMissed'},
+    {label:'急件完成檢驗',at:t=>t.ts.confirmed==null?null:t.isUrgent?t.ts.confirmed+60:990,until:'inspect',flag:'rushLate'}];
+  t.resultText=['pass','判定：合格',`${mat}（批號 ${batch}）各檢驗項目均符合規格。`];
+  t.onDone=t=>{ if(t.released) addCOA(t); };
+  return t;
+}
+const iqcFailTask=()=>S.tasks.find(t=>t.sample&&t.sample.kind==='IQC'&&t.sample.result==='fail');
+const EM_POOL=[
+  {id:'EM_FRIDGE',name:'錫膏冷藏庫溫度警報',loc:'L',limit:30,title:'冷藏庫溫度超出保存範圍',
+   desc:'冷藏庫顯示 14°C，超出錫膏 0–10°C 的保存範圍（示範數值）。庫內有今天要出貨的錫膏。',missMajor:'冷藏庫溫度警報逾時未處理',missRisk:20,choices:[
+    {label:'查溫度紀錄、隔離受影響批次並通報主管',dur:15,score:20},
+    {label:'把門關緊，等溫度自己回穩',dur:2,score:10,risk:15,flag:'halfFix',riskText:'受影響的批次沒有被隔離'},
+    {label:'應該是感測器誤報，不理它',dur:0,score:0,risk:40,flag:'emIgnore',major:'冷藏庫溫度異常未處理',riskText:'構成重大品質失誤'}]},
+  {id:'EM_INSTR',name:'實驗室儀器故障',loc:'L',limit:60,title:'檢驗儀器故障，所有檢驗暫停',
+   desc:'主要檢驗儀器跳出錯誤代碼。處理完之前，實驗室無法進行任何檢驗。',
+   onAppear:()=>{S.instrumentDown=true;if(S.inspecting){stopInspect();notify('儀器故障，進行中的檢驗被迫暫停。','bad')}},choices:[
+    {label:'改用備用儀器，先做校正確認',dur:15,score:20,fx:()=>S.instrumentDown=false},
+    {label:'叫廠商來修，等修好再測',dur:35,score:10,fx:()=>S.instrumentDown=false,riskText:'會吃掉大量時間'},
+    {label:'不校正，直接用備用儀器',dur:2,score:0,risk:25,flag:'noCalib',fx:()=>S.instrumentDown=false,riskText:'之後的檢驗數據可信度不足'}]},
+  {id:'EM_WAIVER',name:'產線要求特採',loc:'P',limit:30,cond:()=>{const t=iqcFailTask();return t&&stepDone(t,'return')},title:'產線缺料，要求讓步使用不合格原料',
+   desc:'產線組長：「今天 IQC 不合格那批原料能不能先用？不然下午要停線。」',choices:[
+    {label:'依程序送主管評估特採，產線先等',dur:10,score:20},
+    {label:'產線很急，口頭答應先用',dur:0,score:0,risk:40,flag:'ignoreFail',major:'不合格原料未經核准即讓步使用',riskText:'構成重大品質失誤'},
+    {label:'直接拒絕，不轉給主管',dur:2,score:10,riskText:'產線可能停線，主管事後才知道'}]},
+  {id:'EM_BOSS',name:'主管臨時叫人',loc:'M',limit:20,title:'主管要你帶資料過去',
+   desc:'主管傳訊息：「客戶下午會打電話來，帶今天的檢驗資料來我辦公室。」',choices:[
+    {label:'帶當日檢驗資料過去說明',dur:20,score:20},
+    {label:'回訊息說手上很忙，晚點再去',dur:0,score:10},
+    {label:'已讀不回',dur:0,score:0,flag:'ignoreBoss'}]},
+  {id:'EM_AUDIT',name:'客戶稽核抽查紀錄',loc:'O',limit:30,title:'稽核員要調閱檢驗紀錄',
+   desc:'客戶稽核員臨時要求調閱上週同批產品的原始檢驗紀錄。',choices:[
+    {label:'調出完整紀錄並說明',dur:15,score:20},
+    {label:'只給摘要，說原始資料還在整理',dur:3,score:10},
+    {label:'補寫一份紀錄應付過去',dur:5,score:0,risk:40,flag:'fakeCOA',major:'補寫檢驗紀錄應付稽核',riskText:'構成重大品質失誤：紀錄造假'}]},
+  {id:'URG_RM',urgentKind:'RM'},
+  {id:'URG_FG',urgentKind:'FG'}];
+function emergency(d,at){
+  if(d.urgentKind) return urgentInspect(d.urgentKind,at);
+  const t=T({id:d.id,cat:'緊急',name:'緊急：'+d.name,mandatory:false,urgent:true,notice:`緊急狀況：${d.name}（${d.limit} 分鐘內處理）`,
+    appear:d.cond?()=>S.now>=at&&d.cond():at,onAppear:d.onAppear});
+  t.steps=[{key:'e',loc:d.loc,title:d.title,desc:d.desc,choices:d.choices}];
+  t.deadlines=[{label:`處理緊急狀況（${d.limit} 分鐘內）`,at:t=>t.ts.appear+d.limit,until:'e',flag:'emergencyMissed',risk:d.missRisk||0,major:d.missMajor||null}];
+  return t;
+}
+const fqcTasks=()=>S.tasks.filter(t=>/^G\d$/.test(t.id));
+function filingTask(){
+  const t=T({id:'FILE',cat:'文件',name:'生產製單掃描與歸檔',appear:()=>S.now>=CONFIG.filingAt&&fqcTasks().every(x=>x.done),
+    notice:'成品檢驗都完成了，可以集中處理製單歸檔'});
+  t.steps=fqcTasks().map((g,i)=>({key:'f'+i,loc:'O',title:`掃描並歸檔製單（${g.sample.mat}）`,desc:`批號 ${g.sample.batch}`,choices:[
+    {label:'掃描並歸檔',dur:CONFIG.filing,score:20},{label:'用手機拍照存著，不正式歸檔',dur:1,score:0,flag:'sloppyFiling'}]}));
+  return t;
+}
+function briefTask(){
+  return T({id:'BRIEF',cat:'文件',name:'當日檢驗簡報',appear:900,notice:'下午工作：整理當日檢驗簡報',
+    steps:[{key:'b',loc:'O',title:'整理當日檢驗簡報',desc:'彙整今日 IQC 與 FQC 結果。',choices:[{label:'製作並送出檢驗簡報',dur:CONFIG.briefing,score:20},
+      {label:'拿上週的簡報改日期交差',dur:3,score:0,risk:5,flag:'copyBrief',riskText:'簡報數據和今天不符'}]}]});
+}
+function genAt(off){return S.genUnlockedAt!=null&&S.now>=S.genUnlockedAt+off}
+
+/* ===================== 狀態 ===================== */
+function newGame(){
+  S={phase:'intro',now:480,penalty:0,eventScore:0,risk:0,trust:CONFIG.trustStart,majors:[],missed:[],flags:{},
+    tasks:[],instrumentDown:false,selected:null,inspecting:null,lunchDone:false,lunch:false,ended:false,genUnlockedAt:null,
+    px:6.5,py:3.5,dir:[0,1],clockAcc:0,keys:{},sheet:false,here:null,dirty:true,patrolReported:0,saved:null};
+  const sh=a=>{a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+  const ri=(a,b)=>a+Math.floor(Math.random()*(b-a+1));
+  const iqcFail=Math.random()<.5?1:2, gr=sh(['pass','fail','spc']);
+  const cps=[...CP_POOL.filter(c=>c.fixed),...sh(CP_POOL.filter(c=>!c.fixed)).slice(0,CONFIG.tempComplaints-2)];
+  const cpTimes=sh([[555,620],[640,700],[790,840],[850,900],[910,950]].slice(0,cps.length)).map(([a,b])=>ri(a,b));
+  const pool=sh(EM_POOL), urg=pool.filter(d=>d.urgentKind).slice(0,1);
+  const ems=sh([...urg,...pool.filter(d=>!d.urgentKind)]).slice(0,CONFIG.emergencies), emTimes=[[570,650],[795,870],[885,950]];
+  S.tasks=[
+    sampleTask({id:'IQC1',kind:'IQC',name:'IQC 進料檢驗 #1',mat:'錫粉（原料）',batch:'RM-2610-031',result:iqcFail===1?'fail':'pass',appear:ri(488,500)}),
+    sampleTask({id:'IQC2',kind:'IQC',name:'IQC 進料檢驗 #2',mat:'助焊劑原料',batch:'RM-2610-047',result:iqcFail===2?'fail':'pass',appear:ri(510,528)}),
+    sampleTask({id:'G1',kind:'GEN',name:'FQC 成品檢驗 #1',mat:'錫膏成品',batch:'FG-2610-112',result:gr[0],appear:()=>genAt(5)}),
+    sampleTask({id:'G2',kind:'GEN',name:'FQC 成品檢驗 #2',mat:'錫絲成品',batch:'FG-2610-118',result:gr[1],appear:()=>genAt(35)}),
+    sampleTask({id:'G3',kind:'GEN',name:'FQC 成品檢驗 #3',mat:'助焊劑成品',batch:'FG-2610-121',result:gr[2],appear:()=>genAt(70)}),
+    patrolTask(), mainComplaint(),
+    ...cps.map((c,i)=>tempComplaint('TMP'+(i+1),c,cpTimes[i])),
+    ...ems.map((d,i)=>emergency(d,ri(...emTimes[i%emTimes.length])))];
+  S.tasks.push(filingTask(), briefTask());
+  checkUnlocks(true);
+}
+
+/* ===================== 統一時間更新 ===================== */
+function overtimeTick(){
+  for(const t of S.tasks){ if(!t.unlocked||t.done||t.lateStart) continue;
+    for(const d of activeDeadlines(t)){ if(!d.missed) continue; d.over=(d.over||0)+1;
+      if((d.over-1)%CONFIG.overtimeEvery===0){S.penalty+=CONFIG.overtimePoints; d.pen=(d.pen||0)+CONFIG.overtimePoints} } }
+}
+function tick(){
+  S.now++;
+  if(S.inspecting){const {t,st}=S.inspecting; st.remaining=Math.max(0,st.remaining-1); updateInspect(); if(st.remaining<=0){stopInspect();finishInspect(t,st);}}
+  checkDeadlines(); overtimeTick(); checkUnlocks();
+  if(S.now===720&&!S.lunchDone) doLunch();
+  if(S.now>=1020) endDay();
+  S.dirty=true;
+}
+function advance(n){for(let i=0;i<n;i++){if(S.ended)return;tick()}}
+function activeDeadlines(t){return t.deadlines.filter(d=>!stepDone(t,d.until))}
+function checkDeadlines(){
+  for(const t of S.tasks){ if(!t.unlocked||t.done||t.lateStart) continue;
+    for(const d of activeDeadlines(t)){ if(d.missed) continue; const at=d.at(t); if(at==null) continue;
+      if(S.now>at){ d.missed=true; S.missed.push({task:t.name,label:d.label,at,d}); S.trust=clamp(S.trust-CONFIG.trustOverdue);
+        if(d.flag) S.flags[d.flag]=true; if(d.risk) S.risk+=d.risk; if(d.trust) S.trust=clamp(S.trust+d.trust);
+        if(d.major){S.majors.push(d.major);notify('重大品質失誤：'+d.major,'bad')} notify(`逾期：${t.name}｜${d.label}`,'bad'); } } }
+}
+function checkUnlocks(silent){
+  if(S.genUnlockedAt==null){ const a=byId('IQC1'),b=byId('IQC2');
+    if((a.done||stepDone(a,'return'))&&(b.done||stepDone(b,'return'))){S.genUnlockedAt=S.now; if(!silent) notify('兩次 IQC 都完成了，FQC 成品檢驗解鎖。','good');} }
+  for(const t of S.tasks){ if(t.unlocked) continue;
+    const ok=typeof t.appear==='number'?S.now>=t.appear:t.appear();
+    if(ok){ t.unlocked=true; t.ts.appear=S.now; if(S.busy&&(t.urgent||t.cat==='臨時客訴')) t.lateStart=true; if(t.onAppear) t.onAppear(t); if(t.notice&&!silent) notify(t.notice,t.urgent?'bad':''); if(t.urgent&&!S.selected) S.selected=t.id; } }
+  S.dirty=true;
+}
+function doLunch(){
+  S.lunchDone=true; if(S.inspecting) stopInspect();
+  closeSheet(); S.now=780;
+  S.lunch=true; $('#lunch').hidden=false;
+  setTimeout(()=>{$('#lunch').hidden=true;S.lunch=false;notify('13:00 午休結束，繼續工作。')},CONFIG.lunchMs);
+}
+function endDay(){
+  if(S.ended) return; S.ended=true; S.now=Math.min(S.now,1020);
+  if(S.inspecting) stopInspect(); closeSheet(); S.dirty=true;
+  setTimeout(showEnding,700);
+}
+
+/* ===================== 行動 ===================== */
+function nextStep(t){t.step++; if(t.step>=t.steps.length) finishTask(t)}
+function finishTask(t){t.done=true;t.ts.done=S.now; if(t.onDone)t.onDone(t); if(S.selected===t.id)S.selected=null}
+function doChoice(t,st,ch){
+  closeSheet();
+  if(ch.dur>0){ S.busy=true; advance(ch.dur); S.busy=false; if(S.ended) return;
+    for(const x of S.tasks) if(x.lateStart){x.lateStart=false;x.ts.appear=S.now} }
+  S.eventScore+=ch.score||0; S.risk+=ch.risk||0; S.trust=clamp(S.trust+(ch.trust||0));
+  if(ch.major){S.majors.push(ch.major);notify('重大品質失誤：'+ch.major,'bad')}
+  if(ch.flag) S.flags[ch.flag]=true;
+  if(ch.fx) ch.fx(t,st);
+  st.done=true;
+  if(ch.outcome) notify(ch.outcome);
+  if(ch.end) finishTask(t); else nextStep(t);
+  checkUnlocks(); S.dirty=true;
+  if(t.after&&st.key==='confirm'){t.after(t)}
+  if(ch.after){ch.after(t);return}
+  if(!t.done&&S.selected!==t.id&&!(t.steps[t.step]&&t.steps[t.step].chain)) S.selected=t.id;
+  notify(nextMsg(t),'next');
+  const nx=t.steps[t.step];
+  if(!t.done&&nx&&nx.chain) setTimeout(()=>openLocation(nx.loc),160);
+}
+function startInspect(t,st){
+  closeSheet(); if(S.inspecting) return;
+  S.inspecting={t,st}; st.started=true; $('#ibar').hidden=false; updateInspect();
+}
+function stopInspect(){S.inspecting=null;$('#ibar').hidden=true;S.dirty=true}
+function nextMsg(t){
+  if(t.done) return `${t.name}：完成`;
+  const st=t.steps[t.step]; const n=nearest(t);
+  const dl=!n?'無期限':(n.missed||S.now>n.at)?`已逾期（${n.label}，期限 ${fmt(n.at)}）`:`${n.label}｜${fmt(n.at)} 前，剩 ${n.at-S.now} 分`;
+  return `下一步：${W(st.loc)}・${st.title}\n完成時限：${dl}`;
+}
+function finishInspect(t,st){
+  st.done=true; S.eventScore+=20; t.ts.inspected=S.now; if(t.onInspected) t.onInspected(t); nextStep(t); checkUnlocks(); if(!t.done) S.selected=t.id; showResult(t);
+}
+function updateInspect(){
+  if(!S.inspecting) return; const {t,st}=S.inspecting;
+  $('#iName').textContent=`檢驗中：${t.name}`;
+  $('#iLeft').textContent=`剩 ${st.remaining} 分｜共 ${st.inspect} 分｜世界時間 ${fmt(S.now)}`;
+  $('#iProg').style.width=((st.inspect-st.remaining)/st.inspect*100)+'%';
+}
+$('#iPause').onclick=()=>{ if(!S.inspecting) return; const n=S.inspecting.t.name; stopInspect(); notify(`已暫停：${n}。回到實驗室可接續剩餘進度。`); };
+
+/* ===================== 面板 ===================== */
+function actionsAt(loc){
+  const out=[];
+  for(const t of S.tasks){ if(!t.unlocked||t.done) continue; const st=t.steps[t.step]; if(st&&st.loc===loc) out.push({t,st}); }
+  return out.sort((a,b)=>(b.t.id===S.selected)-(a.t.id===S.selected)||(nearest(a.t)?.at??9999)-(nearest(b.t)?.at??9999));
+}
+function nearest(t){let best=null;for(const d of activeDeadlines(t)){const at=d.at(t);if(at==null)continue;if(!best||at<best.at)best={at,label:d.label,missed:d.missed}}return best}
+function dlText(t){const n=nearest(t);if(!n)return '無期限';if(n.missed||S.now>n.at)return `逾期｜${n.label}（${fmt(n.at)}）`;const r=n.at-S.now;return `${n.label}｜${fmt(n.at)} 前｜剩 ${r>=60?Math.floor(r/60)+':'+String(r%60).padStart(2,'0'):r+' 分'}`}
+function isOver(t){return activeDeadlines(t).some(d=>d.missed)}
+function status(t){
+  if(isOver(t)) return 'OVERDUE';
+  if(t.urgent) return 'URGENT';
+  const st=t.steps[t.step];
+  if(st&&st.inspect&&st.started) return S.inspecting&&S.inspecting.st===st?'IN_PROGRESS':'PAUSED';
+  return t.step>0?'IN_PROGRESS':'AVAILABLE';
+}
+const STLBL={URGENT:'緊急',AVAILABLE:'待處理',IN_PROGRESS:'進行中',PAUSED:'暫停',OVERDUE:'逾期'};
+
+let sheetActs=[];
+function openSheet(sub,title,html){$('#shSub').textContent=sub;$('#shTitle').textContent=title;$('#shBody').innerHTML=html;$('#veil').hidden=false;S.sheet=true;$('#shClose').focus({preventScroll:true})}
+function closeSheet(){$('#veil').hidden=true;S.sheet=false}
+$('#shClose').onclick=closeSheet;
+$('#veil').addEventListener('click',e=>{if(e.target.id==='veil')closeSheet()});
+
+function openLocation(loc){
+  if(S.ended||S.lunch) return;
+  sheetActs=actionsAt(loc);
+  let html='';
+  if(!sheetActs.length){
+    html=loc==='T'?`<p class="empty">手機上目前沒有要聯絡的人。<br>檢驗有結果後，通知產線、採購、生管都在這裡處理。</p>`:`<p class="empty">這裡目前沒有待處理的工作。<br>從待辦清單選一項任務，跟著地上的黃線走。</p>`;
+  }else sheetActs.forEach((a,i)=>{
+    const {t,st}=a; const n=nearest(t); const od=n&&(n.missed||S.now>n.at);
+    html+=`<div class="card"><div class="card-h"><span class="cat">${esc(t.cat)}｜${esc(t.name)}</span><b>${esc(st.title)}</b>`+
+      (st.desc?`<p>${esc(st.desc).replace(/\n/g,'<br>')}</p>`:'')+`<span class="dl ${od?'od':''}">${esc(dlText(t))}</span></div><div class="opts">`;
+    if(st.inspect){
+      const busy=S.inspecting&&S.inspecting.st!==st, down=S.instrumentDown, off=busy||down;
+      html+=`<button class="opt" data-i="${i}" data-c="insp" ${off?'disabled':''}><span>${st.started?'繼續檢驗':'開始檢驗'}${down?'（儀器故障中）':busy?'（另一項檢驗進行中）':''}</span><em>${st.remaining} 分</em></button>`;
+      if(!st.started) html+=`<button class="opt" data-i="${i}" data-c="quick" ${off?'disabled':''}><span>趕時間，只測主要項目</span><em>5 分</em></button>`;
+    }else st.choices.forEach((c,j)=>{html+=`<button class="opt" data-i="${i}" data-c="${j}"><span>${esc(c.label)}</span><em>${c.dur?c.dur+' 分':'不耗時'}</em></button>`});
+    html+=`</div></div>`;
+  });
+  openSheet(loc==='T'?'隨時可用':'目前位置',loc==='T'?'手機':LOCS[loc].name,html);
+}
+$('#shBody').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  if(b.dataset.tid){S.selected=S.selected===b.dataset.tid?null:b.dataset.tid;closeSheet();S.dirty=true;if(S.selected)notify('導航已開啟，跟著地上的黃線走。');return}
+  if(b.dataset.i!=null){ const a=sheetActs[+b.dataset.i]; if(!a) return;
+    if(b.dataset.c==='insp') detail(a.t,a.st,null);
+    else if(b.dataset.c==='quick') detail(a.t,a.st,{label:'趕時間，只測主要項目',dur:5,score:0,risk:20,flag:'shortInspect',
+      riskText:'品質風險上升：檢驗項目不完整',fx:t=>{t.ts.inspected=S.now;if(t.onInspected)t.onInspected(t)},after:t=>{if(!t.done)S.selected=t.id;showResult(t)}});
+    else detail(a.t,a.st,a.st.choices[+b.dataset.c]); }
+  if(b.dataset.go==='back') openLocation(S.sheetLoc);
+  if(b.dataset.go==='ok'&&pending){const p=pending;pending=null; p.ch?doChoice(p.t,p.st,p.ch):startInspect(p.t,p.st);}
+  if(b.dataset.go==='close') closeSheet();
+});
+let pending=null;
+function lunchAdj(start,m){return (!S.lunchDone&&start<720&&start+m>=720)?m+60:m}
+function impacts(m){
+  const res=[]; const end=S.now+lunchAdj(S.now,m);
+  for(const t of S.tasks){ if(!t.unlocked||t.done) continue;
+    for(const d of activeDeadlines(t)){ if(d.missed) continue; const at=d.at(t); if(at==null) continue;
+      if(at>=S.now&&at<end) res.push(`${t.name}｜${d.label}（${fmt(at)}）`); } }
+  if(!S.lunchDone&&S.now<720&&end>=720) res.push('會跨過 12:00 午休');
+  if(end>1020) res.push('超過 17:00，下班時這個行動不會完成');
+  return res;
+}
+function detail(t,st,ch){
+  S.sheetLoc=st.loc; pending={t,st,ch};
+  const m=ch?ch.dur:st.remaining;
+  const risk=ch?(ch.riskText||(ch.major?'構成重大品質失誤':ch.risk>0?'品質風險上升':'低')):'低';
+  const imp=impacts(m);
+  const html=`<div class="detail"><span class="cat">${esc(t.cat)}｜${esc(t.name)}</span>
+    <h3>${esc(ch?ch.label:(st.started?'繼續檢驗':'開始檢驗')+'：'+st.title)}</h3>
+    <dl class="kv"><dt>預計耗時</dt><dd>${m?fdur(m):'不耗時'}${ch?'':'（可隨時暫停，世界時間會照常前進）'}</dd>
+    <dt>品質風險</dt><dd class="${(ch&&(ch.major||ch.risk>0))?'warn':''}">${esc(risk)}</dd>
+    <dt>影響期限</dt><dd class="${imp.length?'warn':''}">${imp.length?imp.map(esc).join('<br>'):'不會錯過其他期限'}</dd></dl>
+    <p class="note">確認後才會推進時間，返回不耗時。</p>
+    <div class="row"><button class="btn g" data-go="back">返回</button><button class="btn ${ch&&ch.major?'r':'y'}" data-go="ok">確認執行</button></div></div>`;
+  openSheet(LOCS[st.loc].name,'確認行動',html);
+}
+function showResult(t){
+  const [k,h,p]=t.resultText||['pass','檢驗完成',''];
+  const nx=t.steps[t.step];
+  openSheet('檢驗結果',t.name,`<div class="result ${k}"><b>${esc(h)}</b><p>${esc(p)}</p></div>
+    <p class="note" style="white-space:pre-line;font-size:13.5px;color:var(--ink)">完成時間 ${fmt(S.now)}。
+${esc(nextMsg(t))}</p>
+    <div class="row"><button class="btn y" data-go="close">知道了</button></div>`);
+}
+
+/* ===================== 通知 ===================== */
+function notify(msg,kind){
+  const box=$('#toasts'); const d=document.createElement('div'); d.className='toast '+(kind||''); d.textContent=msg; d.style.whiteSpace='pre-line';
+  box.prepend(d); while(box.children.length>4) box.lastChild.remove();
+  setTimeout(()=>d.remove(),kind==='bad'?6500:kind==='next'?7000:4800);
+}
+
+/* ===================== 待辦清單 ===================== */
+const ROOMNAME={O:'品質辦公室',M:'主管辦公室',L:'實驗室',C:'走廊','.':'走廊',S:'送樣區',P:'產線',B:'產線'};
+function todoList(){return S.tasks.filter(t=>t.unlocked&&!t.done).sort((a,b)=>(nearest(a)?.at??9999)-(nearest(b)?.at??9999))}
+function shortDl(t){const n=nearest(t);if(!n)return '';if(n.missed||S.now>n.at)return '逾期';return fmt(n.at)+' 前'}
+function renderHUD(){
+  $('#clock').textContent=fmt(S.now);
+  const left=Math.max(0,1020-S.now); const room=ROOMNAME[GRID[Math.floor(S.py)][Math.floor(S.px)]]||'';
+  $('#where').textContent=`${room}・剩 ${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}`;
+  $('#sEv').textContent=S.eventScore; $('#sPen').textContent=S.penalty?'−'+S.penalty:'0';
+  const pn=actionsAt('T').length, pb=$('#phBadge'); pb.textContent=pn; pb.hidden=!pn;
+  $('#sRisk').textContent=S.risk?'−'+S.risk:'0'; $('#bRisk').style.width=clamp(S.risk)+'%';
+  const list=todoList();
+  if(S.selected&&!list.some(t=>t.id===S.selected)) S.selected=null;
+  const b=$('#badge'); b.textContent=list.length; b.hidden=!list.length; b.classList.toggle('od',list.some(isOver));
+  const cur=$('#cur'), sel=S.selected&&byId(S.selected);
+  if(sel){const st=sel.steps[sel.step];
+    $('#cNm').textContent=sel.name; $('#cNx').textContent=st.loc==='T'?`下一步：按右上手機・${st.title}`:`下一步：${W(st.loc)}・${st.title}`; $('#cDl').textContent=shortDl(sel);
+  }else{
+    $('#cNm').textContent=list.length?'點這裡選擇任務':'目前沒有待辦';
+    $('#cNx').textContent=list.length?`最近期限：${list[0].name}｜${shortDl(list[0])||'無期限'}`:'新的工作出現時會通知你';
+    $('#cDl').textContent='';
+  }
+  cur.classList.toggle('od',!!(sel&&isOver(sel))); cur.classList.toggle('none',!sel);
+  updateHere();
+  S.dirty=false;
+}
+function openTodo(){
+  if(S.phase!=='play'||S.ended||S.lunch) return;
+  const samples=S.tasks.filter(t=>t.sample); const sd=samples.filter(t=>t.done||stepDone(t,'inspect')).length;
+  const list=todoList();
+  const items=list.length?list.map(t=>{const st=t.steps[t.step];const s=status(t);
+    return `<button class="titem ${t.id===S.selected?'sel':''} ${s==='OVERDUE'?'od':''} ${t.urgent?'urg':''}" data-tid="${t.id}" aria-pressed="${t.id===S.selected}">
+      <span class="rail"></span><span class="nm">${esc(t.name)}</span><span class="chip ${s}">${STLBL[s]}</span>
+      <span class="nx">下一步：${esc(LOCS[st.loc].short)}・${esc(st.title)}</span><span class="dl">${esc(dlText(t))}</span></button>`}).join('')
+    :`<div class="tempty">目前沒有待辦。新的工作出現時會通知你。</div>`;
+  openSheet(`${fmt(S.now)}｜${list.length} 項待處理`,'今日待辦',
+    `<div class="counts"><div><small>檢驗需求</small><strong>${samples.length}</strong></div><div><small>已完成</small><strong>${sd}</strong></div><div><small>待完成</small><strong>${samples.length-sd}</strong></div></div>
+    <div class="tlist">${items}</div>
+    <p class="note">點一項任務開啟導航，再點一次取消。看清單時時間暫停。</p>`);
+}
+$('#listBtn').onclick=openTodo; $('#cur').onclick=openTodo;
+$('#phoneBtn').onclick=()=>{ if(S.phase!=='play'||S.ended||S.lunch) return; openLocation('T'); };
+
+/* ===================== 繪圖 ===================== */
+const cv=$('#cv'),ctx=cv.getContext('2d');
+let VW=GW,VH=GH,cam={x:0,y:0},dpr=1,tile=TS;
+const padMQ=matchMedia('(pointer:coarse),(max-width:820px)');
+const padOn=()=>padMQ.matches;
+function padTiles(){return padOn()?190/tile:0}
+function resize(){
+  const r=$('#stage').getBoundingClientRect(); const w=Math.max(1,r.width),h=Math.max(1,r.height);
+  dpr=Math.min(2,window.devicePixelRatio||1); cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr);
+  tile=Math.max(26,Math.min(44,Math.max(w/GW,h/GH))); VW=w/tile; VH=h/tile;
+}
+function camAxis(p,V,G,padEnd,bias){const span=G+padEnd; if(V>=span) return (span-V)/2; return clamp(p-V*bias,0,span-V)}
+new ResizeObserver(resize).observe($('#stage'));
+function bfs(sx,sy,tx,ty){
+  const K=(x,y)=>y*GW+x, prev=new Map([[K(sx,sy),-1]]), q=[[sx,sy]];
+  while(q.length){const [x,y]=q.shift(); if(x===tx&&y===ty) break;
+    for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const nx=x+dx,ny=y+dy;if(!walk(nx,ny)||prev.has(K(nx,ny)))continue;prev.set(K(nx,ny),K(x,y));q.push([nx,ny])}}
+  if(!prev.has(K(tx,ty))) return [];
+  const p=[];let k=K(tx,ty);while(k!==-1){p.push([k%GW,Math.floor(k/GW)]);k=prev.get(k)}return p.reverse();
+}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.roundRect?ctx.roundRect(x,y,w,h,r):ctx.rect(x,y,w,h)}
+let dashT=0;
+function draw(dt){
+  dashT+=dt*30;
+  cam.x=camAxis(S.px,VW,GW,0,.5); cam.y=camAxis(S.py,VH,GH,padTiles(),.45);
+  const k=dpr*tile/TS; ctx.setTransform(k,0,0,k,0,0); ctx.fillStyle='#283035'; ctx.fillRect(0,0,VW*TS,VH*TS);
+  ctx.save(); ctx.translate(-cam.x*TS,-cam.y*TS);
+  // tiles
+  for(let y=0;y<GH;y++)for(let x=0;x<GW;x++){const c=GRID[y][x];
+    if(c==='#'){ctx.fillStyle='#283035';ctx.fillRect(x*TS,y*TS,TS,TS);continue}
+    ctx.fillStyle=FLOOR[c]||'#ccc';ctx.fillRect(x*TS,y*TS,TS,TS);
+    if(c==='L'){ctx.strokeStyle='rgba(120,140,150,.25)';ctx.strokeRect(x*TS+.5,y*TS+.5,TS-1,TS-1)}
+    if(c==='.'){ctx.fillStyle='rgba(240,185,39,.55)';ctx.fillRect(x*TS+3,y*TS+TS/2-2,TS-6,4)}
+  }
+  // belt
+  ctx.fillStyle='#f0b927';ctx.fillRect(2*TS,11*TS-3,11*TS,3);ctx.fillRect(2*TS,12*TS,11*TS,3);
+  ctx.strokeStyle='rgba(255,255,255,.12)';for(let x=2;x<13;x+=.5){ctx.beginPath();ctx.moveTo(x*TS+(dashT%16)/2,11*TS+4);ctx.lineTo(x*TS+(dashT%16)/2,12*TS-4);ctx.stroke()}
+  // sample area floor marking
+  ctx.strokeStyle='#f0b927';ctx.lineWidth=2;ctx.setLineDash([6,4]);ctx.strokeRect(16.3*TS,10.9*TS,5.4*TS,1.8*TS);ctx.setLineDash([]);ctx.lineWidth=1;
+  // furniture (decor)
+  ctx.fillStyle='#a8b5b3';[[5.6,1.3],[5.6,3.3],[1.3,3.3]].forEach(([x,y])=>{rr(x*TS,y*TS,2.6*TS,.7*TS,3);ctx.fill()});
+  ctx.fillStyle='#b9a88a';rr(11.5*TS,1.25*TS,3*TS,.6*TS,3);ctx.fill();
+  ctx.fillStyle='#c9d3d6';rr(17.2*TS,1.15*TS,5.6*TS,.55*TS,2);ctx.fill();
+  ctx.fillStyle='#8c9a9e';rr(22.3*TS,9.2*TS,.5*TS,2.6*TS,2);ctx.fill();
+  // room labels
+  ctx.font='700 11px "Noto Sans TC",sans-serif';ctx.fillStyle='rgba(28,34,37,.55)';ctx.textBaseline='top';
+  for(const [n,x,y] of ROOMLBL) ctx.fillText(n,x*TS+4,y*TS+3);
+  // samples waiting
+  const waiting=S.tasks.filter(t=>t.sample&&t.unlocked&&!t.done&&t.step===0);
+  waiting.forEach((t,i)=>{ctx.fillStyle=t.sample.kind==='IQC'?'#1f5f63':'#7b5a17';rr((16.8+i*.6)*TS,(11.4)*TS,.45*TS,.45*TS,2);ctx.fill()});
+  // NPCs
+  npc(13.5,1.0,'#33415c','主管'); npc(10.5,9.7,'#6d4c2e','產線');
+  // path
+  const sel=S.selected&&byId(S.selected);
+  let target=null;
+  if(sel&&!sel.done){const st=sel.steps[sel.step];target=st.loc==='T'?null:LOCS[st.loc]}
+  if(target){
+    const path=bfs(Math.floor(S.px),Math.floor(S.py),target.x,target.y);
+    if(path.length){
+      ctx.lineJoin='round';ctx.lineCap='round';
+      const pts=[[S.px,S.py],...path.slice(1).map(([x,y])=>[x+.5,y+.5])];
+      const line=()=>{ctx.beginPath();pts.forEach(([x,y],i)=>i?ctx.lineTo(x*TS,y*TS):ctx.moveTo(x*TS,y*TS));ctx.stroke()};
+      ctx.strokeStyle='rgba(28,34,37,.45)';ctx.lineWidth=7;ctx.setLineDash([]);line();
+      ctx.strokeStyle='#f0b927';ctx.lineWidth=4;ctx.setLineDash([9,7]);ctx.lineDashOffset=-dashT;line();ctx.setLineDash([]);
+    }
+  }
+  // hotspots
+  for(const k in LOCS){const L=LOCS[k];if(L.phone)continue;const n=actionsAt(k).length;const cx=(L.x+.5)*TS,cy=(L.y+.5)*TS;
+    if(target===L){const r=14+Math.sin(dashT/8)*3;ctx.strokeStyle='rgba(240,185,39,.9)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(cx,cy,r+6,0,7);ctx.stroke();ctx.lineWidth=1}
+    ctx.fillStyle='#283035';rr(cx-12,cy-12,24,24,5);ctx.fill();
+    icon(k,cx,cy);
+    ctx.font='700 10px "Noto Sans TC",sans-serif';ctx.textAlign='center';ctx.textBaseline='top';
+    ctx.fillStyle='rgba(255,255,255,.85)';const tw=ctx.measureText(L.tag).width+8;rr(cx-tw/2,cy+15,tw,14,3);ctx.fill();
+    ctx.fillStyle='#1c2225';ctx.fillText(L.tag,cx,cy+16);ctx.textAlign='left';
+    if(n){ctx.fillStyle='#f0b927';ctx.beginPath();ctx.arc(cx+12,cy-12,8,0,7);ctx.fill();ctx.fillStyle='#1c2225';ctx.font='700 11px "IBM Plex Mono",monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(n,cx+12,cy-11.5);ctx.textAlign='left'}
+  }
+  // player
+  const px=S.px*TS,py=S.py*TS;
+  ctx.fillStyle='rgba(0,0,0,.18)';ctx.beginPath();ctx.ellipse(px,py+9,10,4,0,0,7);ctx.fill();
+  ctx.fillStyle='#1f5f63';ctx.beginPath();ctx.arc(px,py,10,0,7);ctx.fill();
+  ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();ctx.lineWidth=1;
+  ctx.fillStyle='#f0b927';ctx.beginPath();ctx.arc(px,py-3,6,Math.PI,0);ctx.fill();
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(px+S.dir[0]*5,py+S.dir[1]*5+1,2.2,0,7);ctx.fill();
+  if(S.here&&!S.sheet&&!S.inspecting){
+    ctx.font='700 11px "Noto Sans TC",sans-serif';const txt=padOn()?'按互動':'E 互動';const w=ctx.measureText(txt).width+12;
+    ctx.fillStyle='#f0b927';rr(px-w/2,py-32,w,17,4);ctx.fill();ctx.fillStyle='#1c2225';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(txt,px,py-23.5);ctx.textAlign='left';
+  }
+  ctx.restore();
+}
+function npc(x,y,c,l){const px=x*TS,py=y*TS;ctx.fillStyle=c;ctx.beginPath();ctx.arc(px,py,8,0,7);ctx.fill();ctx.fillStyle='#e8c9a6';ctx.beginPath();ctx.arc(px,py-2,4.5,0,7);ctx.fill()}
+function icon(k,cx,cy){
+  ctx.strokeStyle='#f0b927';ctx.fillStyle='#f0b927';ctx.lineWidth=1.8;ctx.beginPath();
+  if(k==='O'){ctx.strokeRect(cx-7,cy-6,14,9);ctx.moveTo(cx-4,cy+6);ctx.lineTo(cx+4,cy+6);ctx.moveTo(cx,cy+3);ctx.lineTo(cx,cy+6)}
+  if(k==='M'){ctx.arc(cx,cy-3,3.5,0,7);ctx.moveTo(cx-7,cy+7);ctx.quadraticCurveTo(cx,cy-2,cx+7,cy+7)}
+  if(k==='L'){ctx.moveTo(cx-3,cy-7);ctx.lineTo(cx+3,cy-7);ctx.moveTo(cx-2,cy-7);ctx.lineTo(cx-2,cy-1);ctx.lineTo(cx-7,cy+7);ctx.lineTo(cx+7,cy+7);ctx.lineTo(cx+2,cy-1);ctx.lineTo(cx+2,cy-7)}
+  if(k==='S'){ctx.strokeRect(cx-7,cy-2,6,7);ctx.strokeRect(cx+1,cy-2,6,7);ctx.strokeRect(cx-3,cy-8,6,6)}
+  if(k==='P'){ctx.moveTo(cx-6,cy-7);ctx.lineTo(cx+6,cy-7);ctx.lineTo(cx+6,cy+7);ctx.lineTo(cx-6,cy+7);ctx.closePath();ctx.moveTo(cx-3,cy-2);ctx.lineTo(cx-1,cy);ctx.lineTo(cx+3,cy-4);ctx.moveTo(cx-3,cy+4);ctx.lineTo(cx+3,cy+4)}
+  ctx.stroke();ctx.lineWidth=1;
+}
+
+/* ===================== 移動與輸入 ===================== */
+function canStand(x,y){const r=.3;return walk(Math.floor(x-r),Math.floor(y-r))&&walk(Math.floor(x+r),Math.floor(y-r))&&walk(Math.floor(x-r),Math.floor(y+r))&&walk(Math.floor(x+r),Math.floor(y+r))}
+function running(){return S.phase==='play'&&!S.sheet&&!S.lunch&&!S.ended}
+function frozen(){return S.phase!=='play'||S.sheet||S.inspecting||S.lunch||S.ended}
+function update(dt){
+  if(frozen()) return;
+  let dx=(S.keys.right?1:0)-(S.keys.left?1:0), dy=(S.keys.down?1:0)-(S.keys.up?1:0);
+  if(dx||dy){
+    const len=Math.hypot(dx,dy);dx/=len;dy/=len;S.dir=[dx,dy];
+    const sp=CONFIG.moveSpeed*dt; const ox=S.px,oy=S.py;
+    if(canStand(S.px+dx*sp,S.py)) S.px+=dx*sp;
+    if(canStand(S.px,S.py+dy*sp)) S.py+=dy*sp;
+  }
+  let here=null,best=1.5;
+  for(const k in LOCS){const L=LOCS[k];if(L.phone)continue;const d=Math.hypot(S.px-(L.x+.5),S.py-(L.y+.5));if(d<best){best=d;here=k}}
+  if(here!==S.here){S.here=here;updateHere()}
+}
+function updateHere(){
+  const b=$('#act');
+  if(S.here){const n=actionsAt(S.here).length;b.disabled=false;$('#actTag').textContent=n?`${LOCS[S.here].tag}・${n} 項`:LOCS[S.here].tag}
+  else{b.disabled=true;$('#actTag').textContent='靠近工作站'}
+}
+const KEYMAP={ArrowUp:'up',KeyW:'up',ArrowDown:'down',KeyS:'down',ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right'};
+addEventListener('keydown',e=>{
+  if(e.target&&e.target.tagName==='INPUT') return;
+  if(e.code==='Escape'&&S.sheet){closeSheet();return}
+  const k=KEYMAP[e.code]; if(k){S.keys[k]=true;if(S.phase==='play'&&!S.sheet)e.preventDefault();return}
+  if((e.code==='KeyE'||e.code==='Space'||e.code==='Enter')&&!frozen()&&S.here&&document.activeElement.tagName!=='BUTTON'){e.preventDefault();openLocation(S.here)}
+});
+addEventListener('keyup',e=>{const k=KEYMAP[e.code];if(k)S.keys[k]=false});
+addEventListener('blur',()=>S.keys={});
+document.querySelectorAll('#pad button').forEach(b=>{
+  const k=b.dataset.k;
+  b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);S.keys[k]=true;b.classList.add('on')});
+  const up=()=>{S.keys[k]=false;b.classList.remove('on')};
+  b.addEventListener('pointerup',up);b.addEventListener('pointercancel',up);b.addEventListener('lostpointercapture',up);
+  b.addEventListener('contextmenu',e=>e.preventDefault());
+});
+$('#act').onclick=()=>{if(!frozen()&&S.here)openLocation(S.here)};
+cv.addEventListener('click',e=>{
+  if(frozen()) return;
+  const r=cv.getBoundingClientRect(); const wx=(e.clientX-r.left)/r.width*VW+cam.x, wy=(e.clientY-r.top)/r.height*VH+cam.y;
+  for(const k in LOCS){const L=LOCS[k];if(Math.hypot(wx-(L.x+.5),wy-(L.y+.5))<.9){
+    if(S.here===k) openLocation(k); else notify(`先走到「${L.name}」才能操作。`); return;}}
+});
+
+/* ===================== 結算 ===================== */
+const ADV=[
+  ['ignoreFail','不合格品被當成合格使用','不合格結果一律走不合格流程；缺料壓力交給主管決定，不在現場口頭讓步。'],
+  ['skipInspect','因產線催促跳過檢驗','催促不能取代必要檢驗。先告訴產線預計完成時間，再照流程檢驗。'],
+  ['fakeCOA','COA 或檢驗紀錄沒有對應實際數據','COA 和紀錄必須來自這一批的實際檢驗；來不及就告知業務延後，不能套用或補寫數據。'],
+  ['patrolIgnore','巡檢發現的現場風險沒有回報','投料錯誤、無資格人員操作這類現場風險，看到就回報並要求處理，再繼續巡檢。'],
+  ['riskyCpIgnore','有即時風險的客訴沒有通報管控','混料、標籤批號錯誤這類客訴，就算不接案，也要先通報主管隔離同批庫存或交接給同事。'],
+  ['riskyCpLate','有即時風險的客訴超過 30 分鐘才決定','有即時風險的臨時客訴要優先處理；收到通知就先決定接案、交接或通報。'],
+  ['emIgnore','緊急狀況被忽略','緊急狀況就算判斷不嚴重，也要先確認再決定，不能直接當作沒發生。'],
+  ['emergencyMissed','緊急狀況超過時限才處理','緊急狀況出現時，先暫停手邊能暫停的工作，處理完再回到原本的排程。'],
+  ['shortInspect','趕時間只測主要項目','檢驗項目不能因為趕時間省略；時間不夠時先和主管討論優先順序。'],
+  ['skipNotify','用手機通知的步驟被跳過','檢驗有結果就馬上打給產線、採購或生管，他們才能及時停用或安排。'],
+  ['skipReview','8D 沒送主管審查就寄出','對外回覆前一定要完成內部審查，排程時往前預留審查時段。'],
+  ['skip5M1E','客訴沒有做 5M1E 調查','8D 的原因分析要有現場調查依據，人、機、料、法、環、測都要查過。'],
+  ['partial5M1E','5M1E 只查了一部分','只查原料容易漏掉真正原因，六個面向都要確認。'],
+  ['noCalib','儀器沒校正就直接使用','改用備用儀器前先校正確認，否則之後的數據都不可信。'],
+  ['halfFix','緊急狀況只做表面處理','冷藏庫溫度異常這類狀況，要做到隔離受影響批次，不能只關門。'],
+  ['dumpComplaint','固定客訴轉手給業務','品質客訴要由品質部門建立案件並調查，業務負責和客戶溝通。'],
+  ['skipSupervisor','跳過主管報告或討論','不合格、SPC 異常和客訴都要讓主管知道，討論時間再短也要排進去。'],
+  ['blameCustomer','沒有調查就回覆客戶','先用留樣檢驗和 5M1E 釐清原因，再決定回覆內容，避免客訴升級。'],
+  ['ignoreSPC','SPC 異常沒有完整處理','數值在規格內不代表製程穩定。SPC 異常要報告主管，正式信件要寫清楚風險。'],
+  ['briefMail','正式信件內容不完整','正式信件要寫清楚物料或產品資訊、檢驗結果、判定，收件人才知道影響範圍。'],
+  ['tempHurtMain','接下臨時客訴後，固定客訴逾期','先替固定客訴保留主管討論、檢驗、5M1E、8D 和審查的時段，剩下的時間再評估臨時案件。'],
+  ['cpLate','固定客訴的節點逾期','10:30 收到客訴後，12:00 前先排主管討論；下午提早做檢驗和 5M1E，預留審查時間。'],
+  ['latePickup','樣品沒有在 1 小時內取樣或領取','有取樣期限的工作先做；通知出現就把產線或送樣區排進下一趟路線。'],
+  ['lateResult','取樣後超過 1 小時才完成檢驗','取樣後直接去實驗室，中間不要插入長時間工作。'],
+  ['iqcLate','IQC 沒在 10:00 前完成','上班後先處理兩批 IQC，它們會卡住 FQC 的解鎖。'],
+  ['lateHold','Hold 標籤沒有在 1 小時內張貼','判定不合格後，把通知、報告和貼 Hold 標籤排在接下來一小時內。'],
+  ['lateMail','正式信件拖太久才發','貼完 Hold 標籤或主管同意放行後，回辦公室就把正式信件發出去。'],
+  ['rushLate','緊急檢驗沒在時限內完成','先打電話確認緊急程度；真的很急就排到最前面，做不到要馬上回覆。'],
+  ['noConfirm','緊急檢驗沒先確認就插隊','先確認需求時間，不急的可以排程，避免打亂其他工作。'],
+  ['badSampling','取樣沒有依抽樣計畫','原料要依抽樣計畫取樣，樣品才有代表性。'],
+  ['delegateLabel','標籤交給別人代貼','合格或 Hold 標籤要親自確認貼在正確批次上，避免被誤用。'],
+  ['verbalOnly','巡檢發現只口頭提醒','巡檢發現要正式回報並留紀錄，才能追蹤有沒有改善。'],
+  ['halfPatrol','巡檢只巡一半','巡檢時間不夠就改排其他時段，不要跳過區域。'],
+  ['tempNoReply','臨時客訴放著沒有回應','臨時客訴不一定要接，但要在時限內決定：接案、延後或交接。'],
+  ['ignoreBoss','沒回應主管的臨時要求','臨時要求沒辦法馬上處理時，至少回覆預計時間。'],
+  ['copyBrief','簡報用舊資料交差','簡報要用當日數據；平常就把結果整理好，最後只需要彙整。'],
+  ['sloppySample','樣品或製單沒有歸位','檢驗完立刻把樣品和製單放回送樣區，避免遺失或後續歸檔缺件。'],
+  ['sloppyFiling','製單沒有正式歸檔','製單要掃描進系統歸檔，手機照片不算紀錄。'],
+  ['docsIncomplete','COA、製單或簡報沒有完成','14:30 後成品檢驗一完成就集中處理製單，COA 在放行後馬上開立。'],
+  ['tasksUnfinished','部分固定工作到下班仍未完成','開始前先看待辦清單的期限，依期限排出路線，順路的工作一起做。']];
+function buildEnding(){
+  const done=id=>{const t=byId(id);return !!(t&&t.done)};
+  const coaIds=S.tasks.filter(t=>t.id.startsWith('COA_')).map(t=>t.id);
+  for(const t of fqcTasks()) if(!t.done&&t.sample.result!=='fail') coaIds.push('COA_'+t.id);
+  const FIXED=['IQC1','IQC2','G1','G2','G3','PATROL','CP','FILE','BRIEF',...coaIds];
+  for(const t of S.tasks) if(t.urgent&&t.unlocked&&!t.done&&!t.deadlines[0].missed){S.flags.emergencyMissed=true;S.missed.push({task:t.name,label:'下班前仍未處理',at:null})}
+  for(const t of S.tasks) if(t.risky&&t.unlocked&&!t.controlled&&!t.done&&!S.flags.riskyCpLate){S.flags.riskyCpLate=true}
+  const doneN=FIXED.filter(done).length, completion=doneN/FIXED.length;
+  const docIds=['FILE','BRIEF',...coaIds], docsN=docIds.filter(done).length, docsDone=docsN===docIds.length;
+  const cp=byId('CP'); const cpOk=cp.done&&!cp.deadlines.some(d=>d.missed)&&!S.flags.dumpComplaint&&!S.flags.skipReview;
+  if(!cpOk) S.flags.cpLate=true;
+  if(!docsDone) S.flags.docsIncomplete=true;
+  if(S.flags.tookTemp&&S.flags.cpLate) S.flags.tempHurtMain=true;
+  const keyDone=['IQC1','IQC2','G1','G2','G3','PATROL','CP'].every(done);
+  if(!keyDone) S.flags.tasksUnfinished=true;
+  let ending;
+  if(S.majors.length) ending=['品質紅燈','red','今天發生了重大品質失誤。其他工作做得再多，也抵銷不了這一項。'];
+  else if(!cpOk) ending=['被客訴追著跑','amber','固定客訴的關鍵節點或回覆期限沒有達成，客戶還在等你的初步回覆。'];
+  else if(!docsDone) ending=['文件地獄','amber','檢驗和異常處理吃掉了時間，COA、製單或簡報還堆在桌上。'];
+  else if(keyDone&&S.missed.length===0&&S.risk>CONFIG.guardianRiskMax) ending=['準時下班','teal','關鍵任務和文件都在期限內完成，準時打卡。只是有些品質判斷還能更謹慎。'];
+  else if(S.risk<=CONFIG.guardianRiskMax&&completion>=CONFIG.guardianCompletionMin) ending=['品質守門員','green','固定工作大致完成，品質判斷得當，沒有重大品質失誤。今天的品質守住了。'];
+  else ending=['準時下班','teal','人是下班了，但還有工作沒收尾，明天得先補上。'];
+  const good=[];
+  if(!S.flags.iqcLate&&stepDone(byId('IQC1'),'return')&&stepDone(byId('IQC2'),'return')) good.push('兩批 IQC 都在 10:00 前完成。');
+  if(S.patrolReported===3) good.push('巡檢的三項發現全部回報，現場風險有人處理。');
+  if(cpOk) good.push('錫膏發乾客訴在 16:30 前寄出初步回覆。');
+  if(S.flags.spcHandled) good.push('SPC 異常有報告主管，正式信件也寫清楚了風險。');
+  if(S.flags.holdOnTime) good.push('不合格品在 1 小時內貼上 Hold 標籤。');
+  if(docsDone) good.push('COA、製單歸檔和檢驗簡報全部完成。');
+  const ems=S.tasks.filter(t=>t.cat==='緊急'&&t.unlocked);
+  if(ems.length&&!S.flags.emergencyMissed&&!S.flags.halfFix&&!S.flags.emIgnore) good.push(`${ems.length} 件緊急狀況都在時限內處理。`);
+  if(!S.majors.length&&!good.length) good.push('沒有發生重大品質失誤。');
+  const adv=ADV.filter(([f])=>S.flags[f]).slice(0,3);
+  const total=S.eventScore-S.risk-S.penalty;
+  return {ending,good,adv,doneN,fixedN:FIXED.length,docsN,docsTotal:docIds.length,completion,total};
+}
+function showEnding(){
+  const E=buildEnding(); const {ending,good,adv,total}=E;
+  const riskLvl=S.risk===0?'低':S.risk<=30?'中':'高';
+  const rec={name:S.player||'未填名字',at:new Date().toISOString(),ending:ending[0],event:S.eventScore,risk:S.risk,overtime:S.penalty,total,
+    majors:S.majors.slice(0,10),missed:S.missed.length,done:`${E.doneN}/${E.fixedN}`};
+  S.record=rec;
+  $('#endBody').innerHTML=`
+    <div class="eyebrow">結算｜${esc(rec.name)}｜${fmt(S.now)} 下班</div>
+    <div class="end-stamp ${ending[1]}">${ending[0]}</div>
+    <p>${ending[2]}</p>
+    <div class="metrics" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+      <div class="metric"><small>事件分數</small><strong>${S.eventScore}</strong></div>
+      <div class="metric risk"><small>品質風險｜${riskLvl}</small><strong>−${S.risk}</strong><div class="m-bar"><i style="width:${clamp(S.risk)}%"></i></div></div>
+      <div class="metric risk"><small>超時扣分</small><strong>−${S.penalty}</strong></div>
+    </div>
+    <div class="score-line"><span>事件分數 − 品質風險 − 超時扣分</span><b>總分 ${total}</b></div>
+    <div class="upl" id="upl">正在傳送成績給主辦人…</div>
+    <div class="form"><span>固定任務</span><strong>${E.doneN} / ${E.fixedN} 完成</strong><span>文件</span><strong>${E.docsN} / ${E.docsTotal} 完成</strong></div>
+    <div class="sect"><h4>逾期紀錄</h4><ul>${S.missed.length?S.missed.map(m=>`<li>${esc(m.task)}｜${esc(m.label)}${m.at!=null?`（期限 ${fmt(m.at)}${m.d&&m.d.pen?`，超時扣 ${m.d.pen} 分`:''}）`:''}</li>`).join(''):'<li>沒有逾期。</li>'}</ul></div>
+    <div class="sect"><h4>重大品質失誤</h4><ul>${S.majors.length?S.majors.map(m=>`<li style="color:var(--reject)">${esc(m)}</li>`).join(''):'<li>無。</li>'}</ul></div>
+    <div class="sect"><h4>做得好的地方</h4><ul>${good.slice(0,4).map(g=>`<li>${esc(g)}</li>`).join('')}</ul></div>
+    ${adv.length?`<div class="sect adv"><h4>可以改善的地方與下次做法</h4><ul>${adv.map(([,a,b])=>`<li><b>${esc(a)}</b><span>${esc(b)}</span></li>`).join('')}</ul></div>`:''}
+    <p class="foot-note">原型版本：檢驗數據、客訴調查方法與結局門檻為可替換的示範設定，正式數值待品質部門確認。</p>
+    <button class="big" id="again">再上一次班</button>`;
+  $('#ending').hidden=false; $('#ending').scrollTop=0;
+  autoSend(rec);
+  $('#again').onclick=()=>{$('#ending').hidden=true;const n=S.player;newGame();S.player=n;startPlay()};
+}
+
+/* ===================== Google 表單成績 ===================== */
+const GFORM={url:'https://docs.google.com/forms/d/e/1FAIpQLSdmqSygedqHC9PhZrtGF2Pe-m2U5igdMGZTtOem5YgOp_1Yjw/viewform',
+  name:1700853237,ending:1967955463,event:2042630590,risk:665999076,overtime:1430742227,total:1678315556,majors:1711834610};
+async function autoSend(r){
+  const box=$('#upl'); const q=new URLSearchParams();
+  const put=(k,v)=>q.set('entry.'+GFORM[k],String(v));
+  put('name',r.name);put('ending',r.ending);put('event',r.event);put('risk',r.risk);put('overtime',r.overtime);put('total',r.total);
+  put('majors',r.majors.length?r.majors.join('、'):'無');
+  try{
+    await fetch(GFORM.url.replace(/viewform$/,'formResponse'),{method:'POST',mode:'no-cors',body:q});
+    box.className='upl ok'; box.textContent='成績已自動傳送給主辦人。';
+  }catch(e){
+    box.className='upl no'; box.innerHTML=`成績沒有傳送成功（可能是網路中斷）。<a href="${esc(formUrl(r,false))}" target="_blank" rel="noopener">打開表單手動提交</a>`;
+  }
+}
+function formUrl(r,direct){
+  const q=new URLSearchParams(direct?{}:{usp:'pp_url'});
+  const put=(k,v)=>q.set('entry.'+GFORM[k],String(v));
+  put('name',r.name);put('ending',r.ending);put('event',r.event);put('risk',r.risk);put('overtime',r.overtime);put('total',r.total);
+  put('majors',r.majors.length?r.majors.join('、'):'無');
+  if(direct) q.set('submit','Submit');
+  return (direct?GFORM.url.replace(/viewform$/,'formResponse'):GFORM.url)+'?'+q.toString();
+}
+
+/* ===================== 開始 ===================== */
+function startPlay(){
+  S.phase='play'; S.dirty=true; updateHere();
+  openSheet('08:00｜主管辦公室','早會',`<div class="detail">
+    <h3>主管：「早，今天的重點我講一下。」</h3>
+    <dl class="kv">
+      <dt>IQC</dt><dd>兩批原料，到產線取樣後檢驗，10:00 前完成。兩批都完成，FQC 才會開放。</dd>
+      <dt>時效</dt><dd>通知後 1 小時內取樣；取樣後 1 小時內完成檢驗；不合格判定後 1 小時內貼 Hold 標籤。每個步驟超過期限，每 15 分鐘扣 5 分。</dd>
+      <dt>手機</dt><dd>通知產線、採購、生管，和確認急件，都用右上角的手機，在哪裡都能打。</dd>
+      <dt>客訴</dt><dd>10:30 左右會有錫膏客訴，12:00 前先來找我討論；之後檢驗、查 5M1E、寫 8D 給我審，16:30 前寄出初步回覆。</dd>
+      <dt>其他</dt><dd>巡檢 10:00 後才能做，15:00 前完成；製單歸檔 14:30 後、成品檢驗都完成再集中處理。</dd>
+    </dl>
+    <p class="note">閱讀時時間暫停。關掉後時鐘開始走，點上方任務列或清單按鈕選任務。</p>
+    <div class="row"><button class="btn y" data-go="close">開始工作</button></div></div>`);
+  notify('早會結束。IQC 原料到廠後，會通知你到產線取樣。');
+}
+const nameIn=$('#pname');
+try{const v=localStorage.getItem('qc-player');if(v)nameIn.value=v}catch(e){}
+const syncName=()=>{$('#startBtn').disabled=!nameIn.value.trim()};syncName();
+nameIn.addEventListener('input',syncName);
+nameIn.addEventListener('keydown',e=>{if(e.key==='Enter'&&nameIn.value.trim())$('#startBtn').click()});
+$('#startBtn').onclick=()=>{const n=nameIn.value.trim().slice(0,20);if(!n)return;S.player=n;try{localStorage.setItem('qc-player',n)}catch(e){}
+  $('#intro').hidden=true;startPlay()};
+
+newGame(); resize();
+let last=performance.now();
+function loop(now){const dt=Math.min(.05,(now-last)/1000);last=now;
+  if(S){
+    if(running()){S.clockAcc+=dt;let rate;while(S.clockAcc>=(rate=S.inspecting?CONFIG.inspectSecPerGameMin:CONFIG.realSecPerGameMin)){S.clockAcc-=rate;advance(1);if(!running())break}}
+    update(dt);if(S.dirty)renderHUD();draw(dt)}
+  requestAnimationFrame(loop)}
+requestAnimationFrame(loop);
+</script>
+
+</body></html>
