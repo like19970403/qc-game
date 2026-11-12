@@ -270,7 +270,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-acti
       <div class="form">
         <span>工作時間</span><strong>08:00 – 17:00（午休直接跳過）</strong>
         <span>遊玩時間</span><strong>約 10–15 分鐘</strong>
-        <span>評分</span><strong>事件分數 − 品質風險 − 超時扣分（每個步驟超過期限，每 15 分鐘扣 5 分）</strong>
+        <span>評分</span><strong>事件分數 − 品質風險 − 超時扣分（每個步驟超過期限，每 15 分鐘扣 5 分）− 未完成扣分（固定任務或文件沒做完，每件扣 100 分）</strong>
         <span>操作</span><strong>方向鍵 / WASD 或畫面方向鍵移動，E 或「互動」執行</strong>
         <span>成績</span><strong>完成一天後，名字和成績會自動傳給主辦人</strong>
       </div>
@@ -299,6 +299,7 @@ const CONFIG={
   spcDiscuss:10, patrol:30, patrolReport:3,
   cpRead:5, cpDiscuss1:10, cp5M1E:20, cpDiscuss2:20, cp8D:15, cpReview:5, cpSend:2,
   coa:10, filing:5, briefing:10,
+  unfinishedPoints:100,     // 固定任務或文件下班時沒完成，每件扣 100 分
   overtimeEvery:15, overtimePoints:5,  // 每個步驟超過期限後，每 15 分鐘扣 5 分（不足 15 分鐘也算一次）
   filingAt:870,            // 製單歸檔：14:30 後且成品檢驗完成
   patrolAt:600,            // 巡檢：10:00 後才能執行
@@ -598,7 +599,7 @@ function newGame(){
   const pool=sh(EM_POOL), urg=pool.filter(d=>d.urgentKind).slice(0,1);
   const ems=sh([...urg,...pool.filter(d=>!d.urgentKind)]).slice(0,CONFIG.emergencies), emTimes=[[570,650],[795,870],[885,950]];
   S.tasks=[
-    sampleTask({id:'IQC1',kind:'IQC',name:'IQC 進料檢驗 #1',mat:'錫粉（原料）',batch:'RM-2610-031',result:iqcFail===1?'fail':'pass',appear:ri(488,500)}),
+    sampleTask({id:'IQC1',kind:'IQC',name:'IQC 進料檢驗 #1',mat:'錫粉（原料）',batch:'RM-2610-031',result:iqcFail===1?'fail':'pass',appear:485}),
     sampleTask({id:'IQC2',kind:'IQC',name:'IQC 進料檢驗 #2',mat:'助焊劑原料',batch:'RM-2610-047',result:iqcFail===2?'fail':'pass',appear:ri(510,528)}),
     sampleTask({id:'G1',kind:'GEN',name:'FQC 成品檢驗 #1',mat:'錫膏成品',batch:'FG-2610-112',result:gr[0],appear:()=>genAt(5)}),
     sampleTask({id:'G2',kind:'GEN',name:'FQC 成品檢驗 #2',mat:'錫絲成品',batch:'FG-2610-118',result:gr[1],appear:()=>genAt(35)}),
@@ -1057,8 +1058,11 @@ function buildEnding(){
   if(ems.length&&!S.flags.emergencyMissed&&!S.flags.halfFix&&!S.flags.emIgnore) good.push(`${ems.length} 件緊急狀況都在時限內處理。`);
   if(!S.majors.length&&!good.length) good.push('沒有發生重大品質失誤。');
   const adv=ADV.filter(([f])=>S.flags[f]).slice(0,3);
-  const total=S.eventScore-S.risk-S.penalty;
-  return {ending,good,adv,doneN,fixedN:FIXED.length,docsN,docsTotal:docIds.length,completion,total};
+  const undone=FIXED.filter(id=>!done(id)).map(id=>{const t=byId(id);if(t)return t.name;
+    if(id.startsWith('COA_')){const g=byId(id.slice(4));return 'COA｜'+(g?g.sample.mat:id)}return id});
+  const unfinished=undone.length*CONFIG.unfinishedPoints;
+  const total=S.eventScore-S.risk-S.penalty-unfinished;
+  return {ending,good,adv,doneN,fixedN:FIXED.length,docsN,docsTotal:docIds.length,completion,total,undone,unfinished};
 }
 function showEnding(){
   const E=buildEnding(); const {ending,good,adv,total}=E;
@@ -1070,14 +1074,16 @@ function showEnding(){
     <div class="eyebrow">結算｜${esc(rec.name)}｜${fmt(S.now)} 下班</div>
     <div class="end-stamp ${ending[1]}">${ending[0]}</div>
     <p>${ending[2]}</p>
-    <div class="metrics" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+    <div class="metrics">
       <div class="metric"><small>事件分數</small><strong>${S.eventScore}</strong></div>
       <div class="metric risk"><small>品質風險｜${riskLvl}</small><strong>−${S.risk}</strong><div class="m-bar"><i style="width:${clamp(S.risk)}%"></i></div></div>
       <div class="metric risk"><small>超時扣分</small><strong>−${S.penalty}</strong></div>
+      <div class="metric risk"><small>未完成扣分｜${E.undone.length} 件</small><strong>−${E.unfinished}</strong></div>
     </div>
-    <div class="score-line"><span>事件分數 − 品質風險 − 超時扣分</span><b>總分 ${total}</b></div>
+    <div class="score-line"><span>事件 − 風險 − 超時 − 未完成</span><b>總分 ${total}</b></div>
     <div class="upl" id="upl">正在傳送成績給主辦人…</div>
     <div class="form"><span>固定任務</span><strong>${E.doneN} / ${E.fixedN} 完成</strong><span>文件</span><strong>${E.docsN} / ${E.docsTotal} 完成</strong></div>
+    <div class="sect"><h4>未完成的固定任務與文件（每件 −${CONFIG.unfinishedPoints}）</h4><ul>${E.undone.length?E.undone.map(n=>`<li>${esc(n)}</li>`).join(''):'<li>全部完成。</li>'}</ul></div>
     <div class="sect"><h4>逾期紀錄</h4><ul>${S.missed.length?S.missed.map(m=>`<li>${esc(m.task)}｜${esc(m.label)}${m.at!=null?`（期限 ${fmt(m.at)}${m.d&&m.d.pen?`，超時扣 ${m.d.pen} 分`:''}）`:''}</li>`).join(''):'<li>沒有逾期。</li>'}</ul></div>
     <div class="sect"><h4>重大品質失誤</h4><ul>${S.majors.length?S.majors.map(m=>`<li style="color:var(--reject)">${esc(m)}</li>`).join(''):'<li>無。</li>'}</ul></div>
     <div class="sect"><h4>做得好的地方</h4><ul>${good.slice(0,4).map(g=>`<li>${esc(g)}</li>`).join('')}</ul></div>
@@ -1119,7 +1125,7 @@ function startPlay(){
   openSheet('08:00｜主管辦公室','早會',`<div class="detail">
     <h3>主管：「早，今天的重點我講一下。」</h3>
     <dl class="kv">
-      <dt>IQC</dt><dd>兩批原料，到產線取樣後檢驗，10:00 前完成。兩批都完成，FQC 才會開放。</dd>
+      <dt>IQC</dt><dd>第一批原料 08:05 到廠。兩批原料到產線取樣後檢驗，10:00 前完成。兩批都完成，FQC 才會開放。</dd>
       <dt>時效</dt><dd>通知後 1 小時內取樣；取樣後 1 小時內完成檢驗；不合格判定後 1 小時內貼 Hold 標籤。每個步驟超過期限，每 15 分鐘扣 5 分。</dd>
       <dt>手機</dt><dd>通知產線、採購、生管，和確認急件，都用右上角的手機，在哪裡都能打。</dd>
       <dt>客訴</dt><dd>10:30 左右會有錫膏客訴，12:00 前先來找我討論；之後檢驗、查 5M1E、寫 8D 給我審，16:30 前寄出初步回覆。</dd>
